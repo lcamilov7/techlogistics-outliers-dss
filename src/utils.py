@@ -51,7 +51,11 @@ def cargar_todo():
 
 
 def parsear_fecha(serie: pd.Series) -> pd.Series:
-    return pd.to_datetime(serie, format="%d/%m/%Y", errors="coerce")
+    parsed = pd.to_datetime(serie, format="%d/%m/%Y", errors="coerce")
+    fallo = parsed.isnull() & serie.notnull()
+    if fallo.any():
+        parsed[fallo] = pd.to_datetime(serie[fallo], format="%Y-%m-%d", errors="coerce")
+    return parsed
 
 
 # --- Normalización de ciudad ---
