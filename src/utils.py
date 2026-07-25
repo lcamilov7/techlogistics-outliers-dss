@@ -3,11 +3,35 @@ Utilidades compartidas: carga de datos, normalización de texto, manejo de fecha
 """
 import pandas as pd
 import re
+import difflib
 from datetime import datetime
 
 
 DATA_PATH = "data"
 ENCODING = "latin-1"
+
+
+def _limpiar_texto(texto: str) -> str:
+    """Lowercase, quitar tildes basicas, eliminar caracteres no alfanumericos."""
+    t = texto.lower().strip()
+    t = t.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    t = re.sub(r"[^a-z0-9]", "", t)
+    return t
+
+
+def _fuzzy_match(clave, candidatos, umbral=0.80):
+    """
+    Busca el mejor match entre 'clave' y las claves de 'candidatos' usando
+    similitud de secuencia (difflib). Retorna el valor canónico si supera el umbral.
+    """
+    mejor = None
+    mejor_score = 0.0
+    for canon_key, canon_val in candidatos.items():
+        score = difflib.SequenceMatcher(None, clave, canon_key).ratio()
+        if score > mejor_score:
+            mejor_score = score
+            mejor = canon_val
+    return mejor if mejor_score >= umbral else None
 
 
 def cargar_inventario() -> pd.DataFrame:
@@ -31,55 +55,47 @@ def parsear_fecha(serie: pd.Series) -> pd.Series:
 
 
 # --- Normalización de ciudad ---
-CIUDAD_MAPEO = {
-    "Bogotá": "Bogotá",
-    "Bogota": "Bogotá",
-    "bogotá": "Bogotá",
+CIUDAD_CANONICAS = {
     "bogota": "Bogotá",
-    "BOG": "Bogotá",
     "bog": "Bogotá",
-    "Medellín": "Medellín",
-    "Medellin": "Medellín",
-    "medellín": "Medellín",
     "medellin": "Medellín",
-    "MED": "Medellín",
     "med": "Medellín",
-    "Cali": "Cali",
     "cali": "Cali",
-    "CAL": "Cali",
-    "Barranquilla": "Barranquilla",
+    "cal": "Cali",
     "barranquilla": "Barranquilla",
-    "BAQ": "Barranquilla",
-    "Cartagena": "Cartagena",
+    "baq": "Barranquilla",
     "cartagena": "Cartagena",
-    "CTG": "Cartagena",
-    "Bucaramanga": "Bucaramanga",
+    "ctg": "Cartagena",
     "bucaramanga": "Bucaramanga",
-    "BGA": "Bucaramanga",
-    "Ventas_Web": "Ventas_Web",
+    "bga": "Bucaramanga",
+    "ventasweb": "Ventas_Web",
 }
 
 
 def normalizar_ciudad(valor):
     if pd.isna(valor):
         return valor
-    val = str(valor).strip()
-    return CIUDAD_MAPEO.get(val, val)
+    clave = _limpiar_texto(str(valor))
+    if not clave or clave in ("nan", "none", "null"):
+        return valor
+    if clave in CIUDAD_CANONICAS:
+        return CIUDAD_CANONICAS[clave]
+    match = _fuzzy_match(clave, CIUDAD_CANONICAS, umbral=0.80)
+    if match:
+        return match
+    return str(valor).strip()
 
 
 # --- Normalización de categoría ---
-CATEGORIA_MAPEO = {
-    "smart-phone": "Smartphones",
-    "Smartphones": "Smartphones",
+CATEGORIA_CANONICAS = {
+    "smartphone": "Smartphones",
     "smartphones": "Smartphones",
-    "LAPTOP": "Laptops",
-    "Laptops": "Laptops",
-    "laptops": "Laptops",
-    "Accesorios": "Accesorios",
     "accesorios": "Accesorios",
-    "Monitores": "Monitores",
+    "laptop": "Laptops",
+    "laptops": "Laptops",
+    "monitor": "Monitores",
     "monitores": "Monitores",
-    "Tablets": "Tablets",
+    "tablet": "Tablets",
     "tablets": "Tablets",
 }
 
@@ -87,29 +103,41 @@ CATEGORIA_MAPEO = {
 def normalizar_categoria(valor):
     if pd.isna(valor):
         return valor
-    val = str(valor).strip()
-    return CATEGORIA_MAPEO.get(val, val)
+    clave = _limpiar_texto(str(valor))
+    if not clave or clave in ("nan", "none", "null"):
+        return valor
+    if clave in CATEGORIA_CANONICAS:
+        return CATEGORIA_CANONICAS[clave]
+    match = _fuzzy_match(clave, CATEGORIA_CANONICAS, umbral=0.75)
+    if match:
+        return match
+    return str(valor).strip()
 
 
 # --- Normalización de bodega ---
-BODEGA_MAPEO = {
-    "Norte": "Norte",
+BODEGA_CANONICAS = {
     "norte": "Norte",
-    "Sur": "Sur",
     "sur": "Sur",
-    "Occidente": "Occidente",
     "occidente": "Occidente",
-    "ZONA_FRANCA": "Zona_Franca",
-    "zona_franca": "Zona_Franca",
-    "BOD-EXT-99": "BOD-EXT-99",
+    "zonafranca": "Zona_Franca",
+    "bodext99": "BOD-EXT-99",
+    "centro": "Centro",
+    "oriental": "Oriental",
 }
 
 
 def normalizar_bodega(valor):
     if pd.isna(valor):
         return valor
-    val = str(valor).strip()
-    return BODEGA_MAPEO.get(val, val)
+    clave = _limpiar_texto(str(valor))
+    if not clave or clave in ("nan", "none", "null"):
+        return valor
+    if clave in BODEGA_CANONICAS:
+        return BODEGA_CANONICAS[clave]
+    match = _fuzzy_match(clave, BODEGA_CANONICAS, umbral=0.80)
+    if match:
+        return match
+    return str(valor).strip()
 
 
 # --- Normalización de Ticket_Soporte_Abierto ---

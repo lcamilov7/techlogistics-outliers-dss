@@ -262,7 +262,7 @@ with tab_transparencia:
         - **Stock negativo**: Forzado a **0** (no existe stock físico negativo; es error de captura del ERP).
         - **Costo_Unitario_USD outliers**: Capado al límite superior IQR por categoría, sustituyendo valores extremos ($850k) por la mediana categórica.
         - **Lead_Time_Dias**: Extraído valor numérico de cadenas como "25-30 días" calculando el promedio aritmético; nulos imputados con mediana global.
-        - **Categoría "???"**: Sustituida por la **moda** general al no poder inferir la clase real.
+        - **Categoría "???"**: Marcada como **"Sin especificar"** (imposible inferir la categoría real sin datos adicionales; imputar 305 registros a una sola categoría sesgaría el análisis).
         """)
 
     with st.expander("🚚 Transacciones", expanded=True):

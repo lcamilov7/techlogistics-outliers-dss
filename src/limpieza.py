@@ -32,12 +32,8 @@ def limpiar_inventario(df: pd.DataFrame) -> tuple:
     cat_fantasma = (df["Categoria"] == "???")
     n_fantasma = cat_fantasma.sum()
     if n_fantasma > 0:
-        modal = df.loc[~cat_fantasma, "Categoria"].mode()
-        if not modal.empty:
-            df.loc[cat_fantasma, "Categoria"] = modal[0]
-            cambios["acciones"].append(f"Categoria '???' imputada con moda '{modal[0]}': {n_fantasma} filas")
-        else:
-            cambios["acciones"].append(f"Categoria '???' sin moda disponible: {n_fantasma} filas")
+        df.loc[cat_fantasma, "Categoria"] = "Sin especificar"
+        cambios["acciones"].append(f"Categoria '???' marcada como 'Sin especificar': {n_fantasma} filas")
 
     df["Bodega_Origen"] = df["Bodega_Origen"].apply(normalizar_bodega)
 
