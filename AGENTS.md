@@ -31,6 +31,12 @@ Estos datasets contienen datos sucios para practicar detección de outliers:
 - `Cantidad_Vendida` negativa (ej. -5)
 - Valores fuera de rango: `Rating_Producto` de 99, `Tiempo_Entrega_Real` de 999, `Satisfaccion_NPS` de -17.5 (escala NPS: -100 a 100)
 - Tipos mixtos en campos como `Ciudad_Destino` y `Ticket_Soporte_Abierto` (contiene "Sí")
+- **IDs duplicados con datos diferentes**: Hay registros con mismo `Feedback_ID` pero distinta información (Transaccion_ID, ratings, comentarios diferentes). **NO son duplicados reales**; son inconsistencias del sistema de IDs. Se conservan todos los registros y solo se eliminan filas 100% idénticas (duplicados exactos).
+
+### Política de deduplicación
+- **Duplicado exacto** (toda la fila idéntica columna por columna) → **se elimina** (error de sistema).
+- **ID repetido con datos diferentes** → **se CONSERVA** y se reporta como alerta. Eliminar por ID destruiría información válida.
+- Esta política aplica a los 3 datasets.
 
 ### Formato de fechas
 `DD/MM/AAAA` (ej. `25/04/2025`).
