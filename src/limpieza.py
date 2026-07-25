@@ -7,8 +7,9 @@ import pandas as pd
 import numpy as np
 from .utils import (
     normalizar_ciudad, normalizar_categoria, normalizar_bodega,
-    normalizar_ticket, extraer_lead_time_numerico, parsear_fecha,
-    analizar_duplicados, eliminar_duplicados_exactos, validar_fechas_futuras,
+    normalizar_ticket, extraer_lead_time_numerico,
+    analizar_duplicados, eliminar_duplicados_exactos,
+    normalizar_fechas_dataset,
 )
 
 
@@ -78,16 +79,24 @@ def limpiar_inventario(df: pd.DataFrame) -> tuple:
         )
         cambios["acciones"].append(f"Stock_Actual nulos imputados con mediana por categoria: {nulos_stock} filas")
 
-    # 6. Ultima_Revision como fecha y validacion
-    df["Ultima_Revision"] = parsear_fecha(df["Ultima_Revision"])
-    n_fecha_inv = df["Ultima_Revision"].isnull().sum()
-    if n_fecha_inv > 0:
-        cambios["acciones"].append(f"Ultima_Revision: {n_fecha_inv} fechas no parseables")
-
-    futuras = validar_fechas_futuras(df, "Ultima_Revision")
-    n_futuras = futuras.sum()
-    if n_futuras > 0:
-        cambios["acciones"].append(f"ALERTA: {n_futuras} fechas de Ultima_Revision son futuras")
+    # 6. Fechas: normalizar y validar (parseo, futuras, anomalas)
+    df, rep_fechas = normalizar_fechas_dataset(df, ["Ultima_Revision"])
+    if rep_fechas["fechas_no_parseables"] > 0:
+        cambios["acciones"].append(
+            f"Ultima_Revision: {rep_fechas['fechas_no_parseables']} fechas no parseables convertidas a nulo"
+        )
+    if rep_fechas["fechas_futuras"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {rep_fechas['fechas_futuras']} fechas futuras en Ultima_Revision anuladas"
+        )
+    if rep_fechas["fechas_muy_antiguas"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {rep_fechas['fechas_muy_antiguas']} fechas anteriores a 2020 anuladas"
+        )
+    cambios["acciones"].append(
+        f"Fechas normalizadas a DD/MM/YYYY ({rep_fechas['fechas_parseadas']} correctas, "
+        f"limite: {rep_fechas['limite_usado']})"
+    )
 
     cambios["filas_final"] = len(df)
     return df, cambios
@@ -108,16 +117,24 @@ def limpiar_transacciones(df: pd.DataFrame) -> tuple:
             f"pero datos diferentes (CONSERVADOS -- posible inconsistencia de ID)"
         )
 
-    # 1. Fecha_Venta a datetime y validacion
-    df["Fecha_Venta"] = parsear_fecha(df["Fecha_Venta"])
-    n_fecha_inv = df["Fecha_Venta"].isnull().sum()
-    if n_fecha_inv > 0:
-        cambios["acciones"].append(f"Fecha_Venta: {n_fecha_inv} fechas no parseables")
-
-    futuras = validar_fechas_futuras(df, "Fecha_Venta")
-    n_futuras = futuras.sum()
-    if n_futuras > 0:
-        cambios["acciones"].append(f"ALERTA: {n_futuras} fechas de venta futuras detectadas")
+    # 1. Fechas: normalizar y validar (parseo, futuras, anomalas)
+    df, rep_fechas = normalizar_fechas_dataset(df, ["Fecha_Venta"])
+    if rep_fechas["fechas_no_parseables"] > 0:
+        cambios["acciones"].append(
+            f"Fecha_Venta: {rep_fechas['fechas_no_parseables']} fechas no parseables convertidas a nulo"
+        )
+    if rep_fechas["fechas_futuras"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {rep_fechas['fechas_futuras']} fechas de venta futuras anuladas"
+        )
+    if rep_fechas["fechas_muy_antiguas"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {rep_fechas['fechas_muy_antiguas']} fechas anteriores a 2020 anuladas"
+        )
+    cambios["acciones"].append(
+        f"Fechas normalizadas a DD/MM/YYYY ({rep_fechas['fechas_parseadas']} correctas, "
+        f"limite: {rep_fechas['limite_usado']})"
+    )
 
     # 2. Cantidad_Vendida negativa: imputar con mediana por SKU (error de captura)
     neg_cant = df["Cantidad_Vendida"] < 0

@@ -94,6 +94,64 @@ def validar_fechas_futuras(df: pd.DataFrame, columna: str, fecha_limite=None) ->
     return col > fecha_limite
 
 
+def normalizar_fechas_dataset(df: pd.DataFrame, columnas_fecha: list, fecha_limite=None) -> dict:
+    """
+    Normaliza todas las columnas de fecha de un dataset:
+    - Parsea con parsear_fecha (multiformato)
+    - Convierte a DD/MM/YYYY como string para visualizacion
+    - Detecta y reporta fechas futuras, invalidas y anomalas
+    Retorna (df_modificado, reporte).
+    """
+    if fecha_limite is None:
+        fecha_limite = pd.Timestamp.today()
+
+    reporte = {
+        "fechas_parseadas": 0,
+        "fechas_no_parseables": 0,
+        "fechas_futuras": 0,
+        "fechas_muy_antiguas": 0,
+        "limite_usado": fecha_limite.strftime("%d/%m/%Y"),
+        "columnas_procesadas": [],
+    }
+
+    fecha_minima = pd.Timestamp("2020-01-01")
+
+    for col in columnas_fecha:
+        if col not in df.columns:
+            continue
+
+        reporte["columnas_procesadas"].append(col)
+        n_original = df[col].notnull().sum()
+
+        parsed = parsear_fecha(df[col])
+        n_parsed = parsed.notnull().sum()
+        reporte["fechas_parseadas"] += n_parsed
+        reporte["fechas_no_parseables"] += (n_original - n_parsed)
+
+        futuras = parsed > fecha_limite
+        n_fut = futuras.sum()
+        reporte["fechas_futuras"] += n_fut
+        if n_fut > 0:
+            parsed[futuras] = pd.NaT
+
+        muy_antiguas = parsed.notnull() & (parsed < fecha_minima)
+        n_ant = muy_antiguas.sum()
+        reporte["fechas_muy_antiguas"] += n_ant
+        if n_ant > 0:
+            parsed[muy_antiguas] = pd.NaT
+
+        df[col] = parsed
+
+    return df, reporte
+
+
+def formatear_fecha_ddmmyyyy(serie) -> pd.Series:
+    """Convierte una serie datetime a string DD/MM/YYYY para visualizacion."""
+    if not pd.api.types.is_datetime64_any_dtype(serie):
+        return serie
+    return serie.dt.strftime("%d/%m/%Y").where(serie.notnull(), None)
+
+
 # --- Normalización de ciudad ---
 CIUDAD_CANONICAS = {
     "bogota": "Bogotá",

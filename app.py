@@ -262,7 +262,8 @@ with tab_transparencia:
         - **Stock negativo**: Forzado a **0** (no existe stock físico negativo; es error de captura del ERP).
         - **Costo_Unitario_USD outliers**: Capado al límite superior IQR por categoría, sustituyendo valores extremos ($850k) por la mediana categórica.
         - **Lead_Time_Dias**: Extraído valor numérico de cadenas como "25-30 días" calculando el promedio aritmético; nulos imputados con mediana global.
-        - **Categoría "???"**: Marcada como **"Sin especificar"** (imposible inferir la categoría real sin datos adicionales; imputar 305 registros a una sola categoría sesgaría el análisis).
+        - **Categoría "???"**: Marcada como **"Sin especificar"** (imposible inferir la categoría real sin datos adicionales).
+        - **Ultima_Revision**: Fechas normalizadas a formato **DD/MM/YYYY**. Se detectan y anulan fechas futuras o anteriores a 2020. El dataset original usaba YYYY-MM-DD.
         """)
 
     with st.expander("🚚 Transacciones", expanded=True):
@@ -270,6 +271,7 @@ with tab_transparencia:
         - **Cantidad_Vendida negativa**: Tratado como error de captura, no cancelación. Imputado con **mediana por SKU** (si no disponible, mediana global).
         - **Tiempo_Entrega_Real outliers (>P99)**: Capado al percentil 99 para no distorsionar promedios operativos.
         - **Costo_Envio nulos**: Imputado con **mediana por Canal_Venta** (cada canal tiene estructura de costos diferente).
+        - **Fecha_Venta**: Fechas normalizadas a formato **DD/MM/YYYY**. Se detectan y anulan fechas futuras o anteriores a 2020. Soporta 7 formatos de entrada distintos.
         """)
 
     with st.expander("💬 Feedback", expanded=True):
