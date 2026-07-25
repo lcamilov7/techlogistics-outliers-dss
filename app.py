@@ -85,7 +85,11 @@ with tab_auditoria:
             st.metric("Health Score (antes)", f"{hs}%")
             st.metric("Filas", f"{met['total_filas']:,}")
             st.metric("Celdas nulas", f"{met['celdas_nulas']:,} ({met['pct_nulidad_global']}%)")
-            st.metric("Duplicados", met["duplicados"])
+            dup_exactos = met.get("duplicados_exactos", 0)
+            dup_ids = met.get("ids_repetidos_datos_diferentes", 0)
+            st.metric("Duplicados exactos", dup_exactos)
+            if dup_ids > 0:
+                st.warning(f"IDs repetidos con datos diferentes: {dup_ids} registros (conservados)")
 
     st.divider()
     st.subheader("Porcentaje de Nulidad por Columna (Antes)")
@@ -270,7 +274,8 @@ with tab_transparencia:
 
     with st.expander("💬 Feedback", expanded=True):
         st.markdown("""
-        - **Duplicados por Feedback_ID**: Eliminados conservando la primera ocurrencia como registro válido.
+        - **Duplicados exactos**: Solo se eliminan filas 100% idénticas (todas las columnas iguales).
+        - **IDs repetidos con datos diferentes**: Se CONSERVAN. Un mismo Feedback_ID con distinto Transaccion_ID, rating o comentario NO es un duplicado real; es una inconsistencia del sistema de IDs. Eliminarlos destruiría información válida.
         - **Rating_Producto fuera de [1,5]**: Sustituido por la **mediana** redondeada (escala ordinal).
         - **Edad_Cliente > 100**: Imputado con **mediana** global (error de captura, no valor real).
         - **Ticket_Soporte_Abierto**: Normalizado de ["Sí","1","0","No"] a ["Sí","No"] binario.

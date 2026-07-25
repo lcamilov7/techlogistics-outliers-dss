@@ -124,6 +124,46 @@ def normalizar_ticket(valor):
     return valor
 
 
+# --- Duplicados inteligentes ---
+def analizar_duplicados(df, columna_id=None):
+    """
+    Analiza duplicados en un DataFrame distinguiendo dos tipos:
+      - Duplicados exactos: toda la fila es idéntica (error de sistema, se eliminan).
+      - IDs repetidos con datos diferentes: mismo ID pero distinta informacion
+        (inconsistencia de ID, los registros se CONSERVAN pero se reportan).
+
+    Retorna dict con conteos y mascara de filas a eliminar (exactos).
+    """
+    duplicados_exactos = df.duplicated(keep=False)
+    total_exactos = int(duplicados_exactos.sum())
+    filas_a_eliminar = df.duplicated(keep="first")
+
+    resultado = {
+        "duplicados_exactos": total_exactos,
+        "filas_a_eliminar": filas_a_eliminar,
+        "ids_repetidos_datos_diferentes": 0,
+        "columna_id": columna_id,
+    }
+
+    if columna_id and columna_id in df.columns:
+        dups_id = df[df.duplicated(subset=columna_id, keep=False)]
+        if len(dups_id) > 0:
+            diff = 0
+            for _, group in dups_id.groupby(columna_id):
+                if len(group) > 1:
+                    cols = [c for c in group.columns if c != columna_id]
+                    if group[cols].nunique().max() > 1:
+                        diff += len(group)
+            resultado["ids_repetidos_datos_diferentes"] = diff
+
+    return resultado
+
+
+def eliminar_duplicados_exactos(df):
+    """Elimina solo las filas completamente identicas (duplicados exactos)."""
+    return df.drop_duplicates(keep="first").reset_index(drop=True)
+
+
 # --- Normalización de Lead_Time_Dias ---
 def extraer_lead_time_numerico(valor):
     """Extrae el valor numérico de Lead_Time_Dias (ej: '25-30 días' -> 27.5, 'Inmediato' -> 0)."""

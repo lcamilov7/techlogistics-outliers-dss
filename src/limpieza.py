@@ -8,11 +8,24 @@ import numpy as np
 from .utils import (
     normalizar_ciudad, normalizar_categoria, normalizar_bodega,
     normalizar_ticket, extraer_lead_time_numerico, parsear_fecha,
+    analizar_duplicados, eliminar_duplicados_exactos,
 )
 
 
 def limpiar_inventario(df: pd.DataFrame) -> tuple:
     cambios = {"filas_inicial": len(df), "filas_final": 0, "acciones": []}
+
+    # 0. Eliminar solo duplicados exactos (toda la fila identica)
+    dup_info = analizar_duplicados(df, "SKU_ID")
+    n_exactos = dup_info["duplicados_exactos"]
+    if n_exactos > 0:
+        df = eliminar_duplicados_exactos(df)
+        cambios["acciones"].append(f"Duplicados exactos eliminados: {n_exactos} filas")
+    if dup_info["ids_repetidos_datos_diferentes"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {dup_info['ids_repetidos_datos_diferentes']} registros con SKU_ID repetido "
+            f"pero datos diferentes (CONSERVADOS -- posible inconsistencia de ID)"
+        )
 
     # 1. Normalizar categorias y bodegas
     df["Categoria"] = df["Categoria"].apply(normalizar_categoria)
@@ -79,6 +92,18 @@ def limpiar_inventario(df: pd.DataFrame) -> tuple:
 def limpiar_transacciones(df: pd.DataFrame) -> tuple:
     cambios = {"filas_inicial": len(df), "filas_final": 0, "acciones": []}
 
+    # 0. Eliminar solo duplicados exactos (toda la fila identica)
+    dup_info = analizar_duplicados(df, "Transaccion_ID")
+    n_exactos = dup_info["duplicados_exactos"]
+    if n_exactos > 0:
+        df = eliminar_duplicados_exactos(df)
+        cambios["acciones"].append(f"Duplicados exactos eliminados: {n_exactos} filas")
+    if dup_info["ids_repetidos_datos_diferentes"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {dup_info['ids_repetidos_datos_diferentes']} registros con Transaccion_ID repetido "
+            f"pero datos diferentes (CONSERVADOS -- posible inconsistencia de ID)"
+        )
+
     # 1. Fecha_Venta a datetime
     df["Fecha_Venta"] = parsear_fecha(df["Fecha_Venta"])
     n_fecha_inv = df["Fecha_Venta"].isnull().sum()
@@ -132,13 +157,19 @@ def limpiar_transacciones(df: pd.DataFrame) -> tuple:
 def limpiar_feedback(df: pd.DataFrame) -> tuple:
     cambios = {"filas_inicial": len(df), "filas_final": 0, "acciones": []}
 
-    # 1. Eliminar duplicados (Feedback_ID)
-    n_dup = df.duplicated(subset="Feedback_ID").sum()
-    if n_dup > 0:
-        df = df.drop_duplicates(subset="Feedback_ID", keep="first").reset_index(drop=True)
-        cambios["acciones"].append(f"Duplicados por Feedback_ID eliminados: {n_dup} filas")
+    # 0. Analisis de duplicados: solo eliminar exactos, conservar IDs repetidos con datos diferentes
+    dup_info = analizar_duplicados(df, "Feedback_ID")
+    n_exactos = dup_info["duplicados_exactos"]
+    if n_exactos > 0:
+        df = eliminar_duplicados_exactos(df)
+        cambios["acciones"].append(f"Duplicados exactos eliminados: {n_exactos} filas")
+    if dup_info["ids_repetidos_datos_diferentes"] > 0:
+        cambios["acciones"].append(
+            f"ALERTA: {dup_info['ids_repetidos_datos_diferentes']} registros con Feedback_ID repetido "
+            f"pero datos diferentes (CONSERVADOS -- posible inconsistencia de ID en el sistema de feedback)"
+        )
 
-    # 2. Rating_Producto fuera de 1-5 -> marcar con NaN e imputar con mediana
+    # 1. Rating_Producto fuera de 1-5 -> marcar con NaN e imputar con mediana
     mask_rp = (df["Rating_Producto"] < 1) | (df["Rating_Producto"] > 5)
     n_rp = mask_rp.sum()
     if n_rp > 0:

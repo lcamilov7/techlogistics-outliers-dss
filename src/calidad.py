@@ -4,25 +4,22 @@ Calcula Health Score, metricas de nulidad, duplicados y outliers por dataset.
 """
 import pandas as pd
 import numpy as np
+from .utils import analizar_duplicados
 
 
 def _metricas_base(df: pd.DataFrame, nombre: str) -> dict:
     total_filas = len(df)
     total_celdas = df.size
     celdas_nulas = int(df.isnull().sum().sum())
-    duplicados = int(df.duplicated().sum())
 
     pct_nulidad = (celdas_nulas / total_celdas * 100) if total_celdas else 0
-    pct_duplicados = (duplicados / total_filas * 100) if total_filas else 0
 
     return {
         "dataset": nombre,
         "total_filas": total_filas,
         "total_celdas": total_celdas,
         "celdas_nulas": celdas_nulas,
-        "duplicados": duplicados,
         "pct_nulidad_global": round(pct_nulidad, 2),
-        "pct_duplicados": round(pct_duplicados, 2),
     }
 
 
@@ -39,9 +36,9 @@ def _health_score(df: pd.DataFrame) -> float:
     if total_celdas == 0:
         return 0.0
     celdas_nulas = int(df.isnull().sum().sum())
-    filas_dup = int(df.duplicated().sum())
+    filas_dup_exactas = int(df.duplicated().sum())
     penalizacion_nulos = (celdas_nulas / total_celdas) * 100
-    penalizacion_dup = (filas_dup / max(len(df), 1)) * 10
+    penalizacion_dup = (filas_dup_exactas / max(len(df), 1)) * 10
     score = 100 - penalizacion_nulos - penalizacion_dup
     return max(0.0, round(score, 2))
 
@@ -77,7 +74,10 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
     """Auditoria de calidad antes de cualquier limpieza."""
 
     # --- Inventario ---
+    inv_dup = analizar_duplicados(inv_raw, "SKU_ID")
     inv_metricas = _metricas_base(inv_raw, "Inventario")
+    inv_metricas["duplicados_exactos"] = inv_dup["duplicados_exactos"]
+    inv_metricas["ids_repetidos_datos_diferentes"] = inv_dup["ids_repetidos_datos_diferentes"]
     inv_nulos = _pct_nulidad_por_columna(inv_raw)
     inv_health = _health_score(inv_raw)
     inv_outliers = {
@@ -95,10 +95,14 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
         "pct_nulidad_por_columna": inv_nulos,
         "outliers_detectados": inv_outliers,
         "categ_inconsistentes": inv_categ_inconsistentes,
+        "analisis_duplicados": inv_dup,
     }
 
     # --- Transacciones ---
+    trx_dup = analizar_duplicados(trx_raw, "Transaccion_ID")
     trx_metricas = _metricas_base(trx_raw, "Transacciones")
+    trx_metricas["duplicados_exactos"] = trx_dup["duplicados_exactos"]
+    trx_metricas["ids_repetidos_datos_diferentes"] = trx_dup["ids_repetidos_datos_diferentes"]
     trx_nulos = _pct_nulidad_por_columna(trx_raw)
     trx_health = _health_score(trx_raw)
     trx_outliers = {
@@ -118,10 +122,14 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
         "pct_nulidad_por_columna": trx_nulos,
         "outliers_detectados": trx_outliers,
         "categ_inconsistentes": trx_categ_inconsistentes,
+        "analisis_duplicados": trx_dup,
     }
 
     # --- Feedback ---
+    fb_dup = analizar_duplicados(fb_raw, "Feedback_ID")
     fb_metricas = _metricas_base(fb_raw, "Feedback")
+    fb_metricas["duplicados_exactos"] = fb_dup["duplicados_exactos"]
+    fb_metricas["ids_repetidos_datos_diferentes"] = fb_dup["ids_repetidos_datos_diferentes"]
     fb_nulos = _pct_nulidad_por_columna(fb_raw)
     fb_health = _health_score(fb_raw)
     fb_outliers = {
@@ -136,6 +144,7 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
         "health_score_antes": fb_health,
         "pct_nulidad_por_columna": fb_nulos,
         "outliers_detectados": fb_outliers,
+        "analisis_duplicados": fb_dup,
     }
 
     return {
