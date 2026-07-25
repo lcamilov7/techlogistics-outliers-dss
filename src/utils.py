@@ -51,11 +51,47 @@ def cargar_todo():
 
 
 def parsear_fecha(serie: pd.Series) -> pd.Series:
-    parsed = pd.to_datetime(serie, format="%d/%m/%Y", errors="coerce")
-    fallo = parsed.isnull() & serie.notnull()
-    if fallo.any():
-        parsed[fallo] = pd.to_datetime(serie[fallo], format="%Y-%m-%d", errors="coerce")
-    return parsed
+    """
+    Parsea fechas en multiple formatos de manera robusta.
+    Formatos soportados: DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD,
+    DD.MM.YYYY, y variaciones con o sin ceros a la izquierda.
+    Retorna datetime64; valores no parseables quedan como NaT.
+    """
+    FORMATOS = [
+        "%d/%m/%Y",   # 25/04/2025
+        "%Y-%m-%d",   # 2025-11-17
+        "%d-%m-%Y",   # 25-04-2025
+        "%Y/%m/%d",   # 2025/11/17
+        "%d.%m.%Y",   # 25.04.2025
+        "%m/%d/%Y",   # 04/25/2025 (US)
+        "%Y%m%d",     # 20251117
+    ]
+
+    serie_str = serie.astype(str).str.strip()
+    result = pd.Series(pd.NaT, index=serie.index, dtype="datetime64[ns]")
+
+    for fmt in FORMATOS:
+        mask = result.isnull() & serie.notnull()
+        if not mask.any():
+            break
+        parsed = pd.to_datetime(serie_str[mask], format=fmt, errors="coerce")
+        valid = parsed.notnull()
+        result[mask & valid] = parsed[valid]
+
+    return result
+
+
+def validar_fechas_futuras(df: pd.DataFrame, columna: str, fecha_limite=None) -> pd.Series:
+    """
+    Retorna mascara booleana de filas con fecha posterior a fecha_limite.
+    Por defecto usa la fecha actual.
+    """
+    if fecha_limite is None:
+        fecha_limite = pd.Timestamp.today()
+    col = df[columna]
+    if not pd.api.types.is_datetime64_any_dtype(col):
+        return pd.Series(False, index=df.index)
+    return col > fecha_limite
 
 
 # --- Normalización de ciudad ---

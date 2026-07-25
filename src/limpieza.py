@@ -8,7 +8,7 @@ import numpy as np
 from .utils import (
     normalizar_ciudad, normalizar_categoria, normalizar_bodega,
     normalizar_ticket, extraer_lead_time_numerico, parsear_fecha,
-    analizar_duplicados, eliminar_duplicados_exactos,
+    analizar_duplicados, eliminar_duplicados_exactos, validar_fechas_futuras,
 )
 
 
@@ -78,8 +78,16 @@ def limpiar_inventario(df: pd.DataFrame) -> tuple:
         )
         cambios["acciones"].append(f"Stock_Actual nulos imputados con mediana por categoria: {nulos_stock} filas")
 
-    # 6. Ultima_Revision como fecha
+    # 6. Ultima_Revision como fecha y validacion
     df["Ultima_Revision"] = parsear_fecha(df["Ultima_Revision"])
+    n_fecha_inv = df["Ultima_Revision"].isnull().sum()
+    if n_fecha_inv > 0:
+        cambios["acciones"].append(f"Ultima_Revision: {n_fecha_inv} fechas no parseables")
+
+    futuras = validar_fechas_futuras(df, "Ultima_Revision")
+    n_futuras = futuras.sum()
+    if n_futuras > 0:
+        cambios["acciones"].append(f"ALERTA: {n_futuras} fechas de Ultima_Revision son futuras")
 
     cambios["filas_final"] = len(df)
     return df, cambios
@@ -100,11 +108,16 @@ def limpiar_transacciones(df: pd.DataFrame) -> tuple:
             f"pero datos diferentes (CONSERVADOS -- posible inconsistencia de ID)"
         )
 
-    # 1. Fecha_Venta a datetime
+    # 1. Fecha_Venta a datetime y validacion
     df["Fecha_Venta"] = parsear_fecha(df["Fecha_Venta"])
     n_fecha_inv = df["Fecha_Venta"].isnull().sum()
     if n_fecha_inv > 0:
-        cambios["acciones"].append(f"Fechas invalidas eliminadas: {n_fecha_inv} filas")
+        cambios["acciones"].append(f"Fecha_Venta: {n_fecha_inv} fechas no parseables")
+
+    futuras = validar_fechas_futuras(df, "Fecha_Venta")
+    n_futuras = futuras.sum()
+    if n_futuras > 0:
+        cambios["acciones"].append(f"ALERTA: {n_futuras} fechas de venta futuras detectadas")
 
     # 2. Cantidad_Vendida negativa: imputar con mediana por SKU (error de captura)
     neg_cant = df["Cantidad_Vendida"] < 0
