@@ -67,35 +67,53 @@ def _detectar_outliers_dominio(df: pd.DataFrame, columna: str, lim_inf: float, l
 def _detectar_outliers_iqr(df: pd.DataFrame, columna: str, factor_iqr: float = 1.5,
                            lim_inf_natural: float = None) -> dict:
     """
-    Detecta outliers estadisticos con IQR, respetando limites naturales
-    (ej: costos no pueden ser negativos, tiempos no pueden ser < 0).
+    Detecta dos tipos de anomalias por separado:
+      1. Violaciones de dominio: valores por debajo del limite natural
+         (ej: cantidad negativa, stock negativo, costo $0).
+      2. Outliers superiores IQR: valores por encima de Q3 + factor*IQR.
+    Las violaciones de dominio son errores de captura; los outliers superiores
+    son valores estadisticamente atipicos pero potencialmente legitimos.
     """
     serie = df[columna].dropna()
-    if len(serie) == 0:
-        return {"columna": columna, "metodo": "iqr", "tiene_outliers": False,
-                "cantidad": 0, "pct": 0.0, "q1": None, "q3": None,
-                "lim_inf": None, "lim_sup": None}
+    vacio = {"columna": columna, "metodo": "iqr", "tiene_outliers": False,
+             "violaciones_dominio": 0, "outliers_superiores_iqr": 0,
+             "cantidad": 0, "pct": 0.0, "q1": None, "q3": None,
+             "lim_inf_natural": lim_inf_natural, "lim_sup_iqr": None}
 
+    if len(serie) == 0:
+        return vacio
+
+    col = df[columna]
+
+    # 1. Violaciones de dominio (por debajo del limite natural)
+    n_violaciones = 0
+    if lim_inf_natural is not None:
+        violaciones = col < lim_inf_natural
+        n_violaciones = int(violaciones.sum())
+
+    # 2. Outliers superiores via IQR
     q1 = float(serie.quantile(0.25))
     q3 = float(serie.quantile(0.75))
     iqr = q3 - q1
-    lim_inf = max(q1 - factor_iqr * iqr, lim_inf_natural if lim_inf_natural is not None else -float("inf"))
-    lim_sup = q3 + factor_iqr * iqr
+    lim_sup_iqr = q3 + factor_iqr * iqr
+    outliers_sup = col > lim_sup_iqr
+    n_outliers_sup = int(outliers_sup.sum())
 
-    outliers = df[(df[columna] < lim_inf) | (df[columna] > lim_sup)]
-    cantidad = len(outliers)
-    pct = round(cantidad / max(len(df), 1) * 100, 2)
+    total = n_violaciones + n_outliers_sup
+    pct = round(total / max(len(df), 1) * 100, 2)
 
     return {
         "columna": columna,
         "metodo": "iqr",
-        "tiene_outliers": cantidad > 0,
-        "cantidad": cantidad,
+        "tiene_outliers": total > 0,
+        "violaciones_dominio": n_violaciones,
+        "outliers_superiores_iqr": n_outliers_sup,
+        "cantidad": total,
         "pct": pct,
         "q1": round(q1, 2),
         "q3": round(q3, 2),
-        "lim_inf": round(lim_inf, 2),
-        "lim_sup": round(lim_sup, 2),
+        "lim_inf_natural": lim_inf_natural,
+        "lim_sup_iqr": round(lim_sup_iqr, 2),
     }
 
 

@@ -11,41 +11,82 @@ from src.calidad import auditoria_completa, _health_score
 from src.limpieza import limpieza_completa
 
 
-def _filtrar_outliers(df, columna, info):
-    """Filtra las filas del df que son outliers segun la info de auditoria."""
+def _filtrar_outliers_dominio(df, columna, info):
+    """Filtra filas con violaciones de dominio (fuera del rango de dominio o bajo limite natural)."""
     met = info.get("metodo", "iqr")
     col = df[columna]
     if met == "dominio":
-        lim_inf = info["lim_inf"]
-        lim_sup = info["lim_sup"]
-        return df[(col < lim_inf) | (col > lim_sup)]
+        return df[(col < info["lim_inf"]) | (col > info["lim_sup"])]
     else:
-        lim_inf = info["lim_inf"]
-        lim_sup = info["lim_sup"]
-        return df[(col < lim_inf) | (col > lim_sup)]
+        lim = info.get("lim_inf_natural")
+        if lim is not None:
+            return df[col < lim]
+        return df.iloc[:0]
+
+
+def _filtrar_outliers_superiores(df, columna, info):
+    """Filtra filas con outliers superiores IQR (por encima del limite estadistico)."""
+    met = info.get("metodo", "iqr")
+    if met == "iqr":
+        lim = info.get("lim_sup_iqr")
+        if lim is not None:
+            col = df[columna]
+            return df[col > lim]
+    return df.iloc[:0]
 
 
 def _mostrar_outliers_auditoria(df_raw, col_name, info):
-    """Muestra el resumen de outliers y un expander con los registros."""
+    """Muestra el resumen de anomalias con detalle por tipo."""
     met = info.get("metodo", "iqr")
 
     if met == "dominio":
         st.warning(
             f"**{col_name}**: {info['cantidad']} valores fuera del rango "
-            f"válido {info['dominio_esperado']} ({info['pct']}%)"
+            f"válido {info['dominio_esperado']} ({info['pct']}%)\n\n"
+            f"Violación de dominio: la variable tiene una escala definida "
+            f"({info['dominio_esperado']}). Cualquier valor fuera de ese rango "
+            f"es un error de captura, no un outlier estadístico."
         )
+        if info["tiene_outliers"]:
+            outliers = _filtrar_outliers_dominio(df_raw, col_name, info)
+            if len(outliers) > 0:
+                with st.expander(f"Ver los {len(outliers)} registros con {col_name} fuera de rango"):
+                    st.dataframe(outliers, use_container_width=True, height=250)
     else:
-        st.warning(
-            f"**{col_name}**: {info['cantidad']} outliers IQR ({info['pct']}%)\n"
-            f"Rango esperado: [{info['lim_inf']}, {info['lim_sup']}]\n"
-            f"Q1={info['q1']}, Q3={info['q3']}"
-        )
+        viol = info.get("violaciones_dominio", 0)
+        sup = info.get("outliers_superiores_iqr", 0)
+        lim_nat = info.get("lim_inf_natural")
+        lim_iqr = info.get("lim_sup_iqr")
+        q1 = info.get("q1")
+        q3 = info.get("q3")
 
-    if info["tiene_outliers"]:
-        outliers_df = _filtrar_outliers(df_raw, col_name, info)
-        if len(outliers_df) > 0:
-            with st.expander(f"Ver los {len(outliers_df)} registros anómalos de **{col_name}**"):
-                st.dataframe(outliers_df, use_container_width=True, height=250)
+        if viol > 0 or sup > 0:
+            partes = []
+            if viol > 0:
+                partes.append(
+                    f"**{viol}** por debajo del límite natural "
+                    f"({col_name} < {lim_nat}) → error de captura"
+                )
+            if sup > 0:
+                partes.append(
+                    f"**{sup}** por encima de Q3+1.5×IQR "
+                    f"({col_name} > {lim_iqr}) → estadísticamente atípico"
+                )
+            st.warning(f"**{col_name}**: " + " | ".join(partes) + f"\n\n"
+                       f"Q1={q1}, Q3={q3}")
+
+            if viol > 0:
+                df_viol = _filtrar_outliers_dominio(df_raw, col_name, info)
+                if len(df_viol) > 0:
+                    with st.expander(f"Ver los {viol} registros con {col_name} por debajo de {lim_nat} (error de captura)"):
+                        st.dataframe(df_viol, use_container_width=True, height=250)
+            if sup > 0:
+                df_sup = _filtrar_outliers_superiores(df_raw, col_name, info)
+                if len(df_sup) > 0:
+                    with st.expander(f"Ver los {sup} registros con {col_name} por encima de {lim_iqr} (atípico)"):
+                        st.dataframe(df_sup, use_container_width=True, height=250)
+        else:
+            st.success(f"**{col_name}**: sin anomalías detectadas")
 
 
 st.set_page_config(
