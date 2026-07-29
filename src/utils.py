@@ -7,7 +7,7 @@ import difflib
 from datetime import datetime
 
 
-DATA_PATH = "data"
+DATA_PATH = "data/raw"
 ENCODING = "latin-1"
 
 

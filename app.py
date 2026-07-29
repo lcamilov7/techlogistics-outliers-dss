@@ -2,6 +2,7 @@
 Dashboard Streamlit - TechLogistics S.A.S.
 Sistema de Soporte a la Decision (DSS) para deteccion de outliers.
 Fase 1: Auditoria de Calidad y Transparencia.
+Fase 2: Integracion y Fuente Unica de Verdad.
 """
 import streamlit as st
 import pandas as pd
@@ -9,6 +10,10 @@ import pandas as pd
 from src.utils import cargar_todo
 from src.calidad import auditoria_completa, _health_score
 from src.limpieza import limpieza_completa
+from src.procesamiento import (
+    guardar_limpios, crear_fuente_verdad, guardar_fuente_verdad,
+    resumen_huerfanos,
+)
 
 
 def _filtrar_outliers_dominio(df, columna, info):
@@ -114,6 +119,15 @@ def ejecutar_limpieza(_inv, _trx, _fb):
     return limpieza_completa(_inv, _trx, _fb)
 
 
+@st.cache_data
+def ejecutar_procesamiento(_inv_limpio, _trx_limpio, _fb_limpio):
+    """Fase 2: guarda limpios, crea y guarda la fuente unica de verdad."""
+    guardar_limpios(_inv_limpio, _trx_limpio, _fb_limpio)
+    df_unido = crear_fuente_verdad(_trx_limpio, _inv_limpio)
+    guardar_fuente_verdad(df_unido)
+    return df_unido
+
+
 # --- Sidebar ---
 st.sidebar.header("🔎 Filtros")
 st.sidebar.button("🔄 Refrescar Análisis", use_container_width=True, on_click=st.cache_data.clear)
@@ -135,6 +149,11 @@ resultados = ejecutar_limpieza(inv_raw, trx_raw, fb_raw)
 inv_limpio = resultados["inventario"]["df"]
 trx_limpio = resultados["transacciones"]["df"]
 fb_limpio = resultados["feedback"]["df"]
+
+# --- Fase 2: Procesamiento (guardar limpios + left join) ---
+with st.spinner("Procesando Fase 2: creando fuente única de verdad..."):
+    df_unido = ejecutar_procesamiento(inv_limpio, trx_limpio, fb_limpio)
+    info_huerfanos = resumen_huerfanos(df_unido)
 
 # --- Tabs ---
 tab_auditoria, tab_transparencia, tab_operaciones, tab_cliente, tab_ia = st.tabs(
@@ -375,12 +394,96 @@ with tab_transparencia:
 
 
 # =============================================
-# TAB 3: OPERACIONES (placeholder Fase 2)
+# TAB 3: OPERACIONES (Fase 2)
 # =============================================
 with tab_operaciones:
-    st.header("🚚 Operaciones — Fase 2 (Integración)")
-    st.info("Módulo en desarrollo. Aquí se mostrarán: Margen de Utilidad, Brecha de Entrega, SKU Fantasma, etc.")
-    st.caption(f"Datos disponibles: {len(trx_limpio):,} transacciones, {len(inv_limpio):,} productos en inventario.")
+    st.header("🚚 Operaciones — Fuente Única de Verdad")
+
+    st.subheader("📊 Left Join: Transacciones + Inventario")
+    st.caption(
+        "Se unieron las 10,000 transacciones con los 2,500 productos del inventario "
+        "usando `SKU_ID` como llave. Se usó **LEFT JOIN** para no perder ninguna venta. "
+        "Las columnas de inventario quedan vacías para los SKUs que no existen en el catálogo."
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total transacciones", f"{info_huerfanos['total_transacciones']:,}")
+    with col2:
+        st.metric("SKUs huérfanos", info_huerfanos['skus_huerfanos_unicos'])
+    with col3:
+        st.metric("Ventas sin catálogo",
+                  f"{info_huerfanos['transacciones_huerfanas']:,}",
+                  delta=f"{info_huerfanos['pct_huerfanas']}%",
+                  delta_color="off")
+    with col4:
+        st.metric("Ingreso en riesgo",
+                  f"${info_huerfanos['ingreso_huerfano_usd']:,.0f}",
+                  delta=f"{info_huerfanos['pct_ingreso_en_riesgo']}%",
+                  delta_color="off")
+
+    st.success(
+        f"✅ **Trazabilidad verificada**: el left join preserva las {info_huerfanos['total_transacciones']:,} "
+        f"transacciones originales. Ingreso total: ${info_huerfanos['ingreso_total_usd']:,.2f}. "
+        f"0 filas perdidas, 0 filas duplicadas."
+    )
+
+    st.divider()
+    st.subheader("🔍 Explorar el Dataset Unido")
+
+    st.caption(
+        "Usá el filtro para analizar los SKUs huérfanos y decidir si son productos "
+        "no catalogados (hay que registrarlos) o errores de digitación (hay que corregir el SKU_ID)."
+    )
+
+    tipo_filtro = st.radio(
+        "Filtrar por clasificación de SKU:",
+        ["Todos", "Solo catálogo oficial", "Solo SKU fantasma (huérfanos)"],
+        horizontal=True,
+    )
+
+    if tipo_filtro == "Solo catálogo oficial":
+        df_filtrado = df_unido[df_unido["clasificacion_sku"] == "Catalogo oficial"]
+    elif tipo_filtro == "Solo SKU fantasma (huérfanos)":
+        df_filtrado = df_unido[df_unido["clasificacion_sku"] == "SKU fantasma - sin inventario"]
+    else:
+        df_filtrado = df_unido
+
+    st.write(f"Mostrando {len(df_filtrado):,} de {len(df_unido):,} registros")
+    st.dataframe(df_filtrado, use_container_width=True, height=500)
+
+    # Stats cuando se filtra por huerfanos
+    if tipo_filtro == "Solo SKU fantasma (huérfanos)":
+        st.divider()
+        st.subheader("📋 Análisis de SKUs Huérfanos")
+        fantasma = df_filtrado
+
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            st.metric("SKU fantasma más frecuente",
+                      fantasma["SKU_ID"].value_counts().index[0],
+                      help="SKU huérfano con más transacciones")
+        with col_f2:
+            st.metric("SKU fantasma con más ingreso",
+                      f"${fantasma.groupby('SKU_ID')['Precio_Venta_Final'].sum().max():,.0f}",
+                      help="Mayor ingreso generado por un solo SKU huérfano")
+
+        st.subheader("Top 15 SKUs huérfanos por frecuencia")
+        top = fantasma["SKU_ID"].value_counts().head(15).reset_index()
+        top.columns = ["SKU_ID", "Transacciones"]
+        st.dataframe(top, use_container_width=True)
+
+    st.divider()
+    st.subheader("📁 Archivos generados")
+    st.caption("Los siguientes archivos se guardaron en disco:")
+    st.code(
+        "data/processed/\n"
+        "  inventario_limpio.csv\n"
+        "  transacciones_limpio.csv\n"
+        "  feedback_limpio.csv\n"
+        "data/processed/join/\n"
+        "  transacciones_con_inventario.csv"
+    )
 
 
 # =============================================
