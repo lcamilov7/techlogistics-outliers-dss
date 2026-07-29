@@ -11,6 +11,43 @@ from src.calidad import auditoria_completa, _health_score
 from src.limpieza import limpieza_completa
 
 
+def _filtrar_outliers(df, columna, info):
+    """Filtra las filas del df que son outliers segun la info de auditoria."""
+    met = info.get("metodo", "iqr")
+    col = df[columna]
+    if met == "dominio":
+        lim_inf = info["lim_inf"]
+        lim_sup = info["lim_sup"]
+        return df[(col < lim_inf) | (col > lim_sup)]
+    else:
+        lim_inf = info["lim_inf"]
+        lim_sup = info["lim_sup"]
+        return df[(col < lim_inf) | (col > lim_sup)]
+
+
+def _mostrar_outliers_auditoria(df_raw, col_name, info):
+    """Muestra el resumen de outliers y un expander con los registros."""
+    met = info.get("metodo", "iqr")
+
+    if met == "dominio":
+        st.warning(
+            f"**{col_name}**: {info['cantidad']} valores fuera del rango "
+            f"válido {info['dominio_esperado']} ({info['pct']}%)"
+        )
+    else:
+        st.warning(
+            f"**{col_name}**: {info['cantidad']} outliers IQR ({info['pct']}%)\n"
+            f"Rango esperado: [{info['lim_inf']}, {info['lim_sup']}]\n"
+            f"Q1={info['q1']}, Q3={info['q3']}"
+        )
+
+    if info["tiene_outliers"]:
+        outliers_df = _filtrar_outliers(df_raw, col_name, info)
+        if len(outliers_df) > 0:
+            with st.expander(f"Ver los {len(outliers_df)} registros anómalos de **{col_name}**"):
+                st.dataframe(outliers_df, use_container_width=True, height=250)
+
+
 st.set_page_config(
     page_title="TechLogistics DSS | Auditoria",
     page_icon="📊",
@@ -127,7 +164,7 @@ with tab_auditoria:
         )
 
     st.divider()
-    st.subheader("Outliers Detectados (Método IQR, factor 1.5)")
+    st.subheader("Anomalías Detectadas (Reglas de Dominio + IQR)")
 
     col_o1, col_o2 = st.columns(2)
 
@@ -135,25 +172,17 @@ with tab_auditoria:
         st.markdown("**📦 Inventario**")
         for col_name, info in auditoria["inventario"]["outliers_detectados"].items():
             if info["tiene_outliers"]:
-                st.warning(
-                    f"**{col_name}**: {info['cantidad']} outliers ({info['pct']}%)\n"
-                    f"Rango esperado: [{info['lim_inf']}, {info['lim_sup']}]\n"
-                    f"Q1={info['q1']}, Q3={info['q3']}"
-                )
+                _mostrar_outliers_auditoria(inv_raw, col_name, info)
             else:
-                st.success(f"**{col_name}**: sin outliers detectados")
+                st.success(f"**{col_name}**: sin anomalías detectadas")
 
     with col_o2:
         st.markdown("**🚚 Transacciones**")
         for col_name, info in auditoria["transacciones"]["outliers_detectados"].items():
             if info["tiene_outliers"]:
-                st.warning(
-                    f"**{col_name}**: {info['cantidad']} outliers ({info['pct']}%)\n"
-                    f"Rango esperado: [{info['lim_inf']}, {info['lim_sup']}]\n"
-                    f"Q1={info['q1']}, Q3={info['q3']}"
-                )
+                _mostrar_outliers_auditoria(trx_raw, col_name, info)
             else:
-                st.success(f"**{col_name}**: sin outliers detectados")
+                st.success(f"**{col_name}**: sin anomalías detectadas")
 
     st.markdown("---")
     st.markdown("**💬 Feedback**")
@@ -163,12 +192,9 @@ with tab_auditoria:
         target = col_fb1 if i % 2 == 0 else col_fb2
         with target:
             if info["tiene_outliers"]:
-                st.warning(
-                    f"**{col_name}**: {info['cantidad']} outliers ({info['pct']}%)\n"
-                    f"Rango esperado: [{info['lim_inf']}, {info['lim_sup']}]"
-                )
+                _mostrar_outliers_auditoria(fb_raw, col_name, info)
             else:
-                st.success(f"**{col_name}**: sin outliers detectados")
+                st.success(f"**{col_name}**: todos los valores dentro del rango válido")
 
     st.divider()
     st.subheader("📋 Inconsistencias Categóricas (Antes de normalizar)")

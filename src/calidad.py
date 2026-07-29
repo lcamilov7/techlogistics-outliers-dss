@@ -43,15 +43,43 @@ def _health_score(df: pd.DataFrame) -> float:
     return max(0.0, round(score, 2))
 
 
-def _detectar_outliers_numericos(df: pd.DataFrame, columna: str, factor_iqr: float = 1.5) -> dict:
+def _detectar_outliers_dominio(df: pd.DataFrame, columna: str, lim_inf: float, lim_sup: float) -> dict:
+    """
+    Detecta valores fuera de un rango de dominio conocido (ej: rating 1-5, edad 0-120).
+    No usa IQR; usa los limites semanticos de la variable.
+    """
+    serie = df[columna].dropna()
+    outliers = serie[(serie < lim_inf) | (serie > lim_sup)]
+    cantidad = len(outliers)
+
+    return {
+        "columna": columna,
+        "metodo": "dominio",
+        "tiene_outliers": cantidad > 0,
+        "cantidad": cantidad,
+        "pct": round(cantidad / max(len(df), 1) * 100, 2),
+        "lim_inf": lim_inf,
+        "lim_sup": lim_sup,
+        "dominio_esperado": f"[{lim_inf}, {lim_sup}]",
+    }
+
+
+def _detectar_outliers_iqr(df: pd.DataFrame, columna: str, factor_iqr: float = 1.5,
+                           lim_inf_natural: float = None) -> dict:
+    """
+    Detecta outliers estadisticos con IQR, respetando limites naturales
+    (ej: costos no pueden ser negativos, tiempos no pueden ser < 0).
+    """
     serie = df[columna].dropna()
     if len(serie) == 0:
-        return {"columna": columna, "tiene_outliers": False, "cantidad": 0, "pct": 0.0, "q1": None, "q3": None, "lim_inf": None, "lim_sup": None}
+        return {"columna": columna, "metodo": "iqr", "tiene_outliers": False,
+                "cantidad": 0, "pct": 0.0, "q1": None, "q3": None,
+                "lim_inf": None, "lim_sup": None}
 
     q1 = float(serie.quantile(0.25))
     q3 = float(serie.quantile(0.75))
     iqr = q3 - q1
-    lim_inf = q1 - factor_iqr * iqr
+    lim_inf = max(q1 - factor_iqr * iqr, lim_inf_natural if lim_inf_natural is not None else -float("inf"))
     lim_sup = q3 + factor_iqr * iqr
 
     outliers = df[(df[columna] < lim_inf) | (df[columna] > lim_sup)]
@@ -60,6 +88,7 @@ def _detectar_outliers_numericos(df: pd.DataFrame, columna: str, factor_iqr: flo
 
     return {
         "columna": columna,
+        "metodo": "iqr",
         "tiene_outliers": cantidad > 0,
         "cantidad": cantidad,
         "pct": pct,
@@ -81,8 +110,8 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
     inv_nulos = _pct_nulidad_por_columna(inv_raw)
     inv_health = _health_score(inv_raw)
     inv_outliers = {
-        "Stock_Actual": _detectar_outliers_numericos(inv_raw, "Stock_Actual"),
-        "Costo_Unitario_USD": _detectar_outliers_numericos(inv_raw, "Costo_Unitario_USD"),
+        "Stock_Actual": _detectar_outliers_iqr(inv_raw, "Stock_Actual", lim_inf_natural=0),
+        "Costo_Unitario_USD": _detectar_outliers_iqr(inv_raw, "Costo_Unitario_USD", lim_inf_natural=0.01),
     }
     inv_categ_inconsistentes = {
         "Categoria": inv_raw["Categoria"].value_counts().to_dict(),
@@ -106,10 +135,10 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
     trx_nulos = _pct_nulidad_por_columna(trx_raw)
     trx_health = _health_score(trx_raw)
     trx_outliers = {
-        "Cantidad_Vendida": _detectar_outliers_numericos(trx_raw, "Cantidad_Vendida"),
-        "Precio_Venta_Final": _detectar_outliers_numericos(trx_raw, "Precio_Venta_Final"),
-        "Costo_Envio": _detectar_outliers_numericos(trx_raw, "Costo_Envio"),
-        "Tiempo_Entrega_Real": _detectar_outliers_numericos(trx_raw, "Tiempo_Entrega_Real"),
+        "Cantidad_Vendida": _detectar_outliers_iqr(trx_raw, "Cantidad_Vendida", lim_inf_natural=0),
+        "Precio_Venta_Final": _detectar_outliers_iqr(trx_raw, "Precio_Venta_Final", lim_inf_natural=0),
+        "Costo_Envio": _detectar_outliers_iqr(trx_raw, "Costo_Envio", lim_inf_natural=0),
+        "Tiempo_Entrega_Real": _detectar_outliers_dominio(trx_raw, "Tiempo_Entrega_Real", 0, 365),
     }
     trx_categ_inconsistentes = {
         "Ciudad_Destino": trx_raw["Ciudad_Destino"].value_counts().to_dict(),
@@ -133,10 +162,10 @@ def auditoria_completa(inv_raw, trx_raw, fb_raw) -> dict:
     fb_nulos = _pct_nulidad_por_columna(fb_raw)
     fb_health = _health_score(fb_raw)
     fb_outliers = {
-        "Rating_Producto": _detectar_outliers_numericos(fb_raw, "Rating_Producto"),
-        "Rating_Logistica": _detectar_outliers_numericos(fb_raw, "Rating_Logistica"),
-        "Edad_Cliente": _detectar_outliers_numericos(fb_raw, "Edad_Cliente"),
-        "Satisfaccion_NPS": _detectar_outliers_numericos(fb_raw, "Satisfaccion_NPS"),
+        "Rating_Producto": _detectar_outliers_dominio(fb_raw, "Rating_Producto", 1, 5),
+        "Rating_Logistica": _detectar_outliers_dominio(fb_raw, "Rating_Logistica", 1, 5),
+        "Edad_Cliente": _detectar_outliers_dominio(fb_raw, "Edad_Cliente", 0, 120),
+        "Satisfaccion_NPS": _detectar_outliers_dominio(fb_raw, "Satisfaccion_NPS", -100, 100),
     }
 
     auditoria_fb = {
