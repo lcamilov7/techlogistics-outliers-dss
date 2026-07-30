@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 DATA_PATH = "data/raw"
-ENCODING = "latin-1"
+ENCODING = "utf-8"
 
 
 def _limpiar_texto(texto: str) -> str:

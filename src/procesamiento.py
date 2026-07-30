@@ -46,6 +46,16 @@ def crear_fuente_verdad(trx_limpio, inv_limpio):
         "Catalogo oficial",
     )
 
+    # Margen_Bruto: solo calculable para SKUs con catalogo
+    # Margen = (Precio_Venta × Cantidad) - (Costo_Unitario × Cantidad + Costo_Envio)
+    tiene_costo = df["Costo_Unitario_USD"].notnull()
+    df["Margen_Bruto"] = np.nan
+    df.loc[tiene_costo, "Margen_Bruto"] = (
+        df.loc[tiene_costo, "Precio_Venta_Final"] * df.loc[tiene_costo, "Cantidad_Vendida"]
+        - (df.loc[tiene_costo, "Costo_Unitario_USD"] * df.loc[tiene_costo, "Cantidad_Vendida"]
+           + df.loc[tiene_costo, "Costo_Envio"])
+    )
+
     return df
 
 

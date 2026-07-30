@@ -19,11 +19,11 @@ Tres archivos CSV en `data/`:
 **Cruces**: `Transaccion_ID` relaciona feedback ↔ transacciones; `SKU_ID` relaciona transacciones ↔ inventario.
 
 ### Codificación
-Los CSV están en **Latin-1 (ISO-8859-1)**, no en UTF-8. Leer siempre con:
+Los CSV están en **UTF-8**. Leer siempre con:
 ```python
-pd.read_csv("data/...csv", encoding="latin-1")
+pd.read_csv("data/raw/...csv", encoding="utf-8")
 ```
-Leer como UTF-8 corrompe silenciosamente los caracteres acentuados (Sí → S�, Físico → F�sico, días → d�as).
+Leer como Latin-1 corrompe silenciosamente los caracteres acentuados (Sí → SÃ­, Físico → FÃ­sico, días → dÃ­as).
 
 ### Calidad de datos (intencional)
 Estos datasets contienen datos sucios para practicar detección de outliers:

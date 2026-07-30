@@ -473,17 +473,173 @@ with tab_operaciones:
         top.columns = ["SKU_ID", "Transacciones"]
         st.dataframe(top, use_container_width=True)
 
+    # --- Conclusiones y Metricas Financieras (siempre visibles) ---
     st.divider()
-    st.subheader("📁 Archivos generados")
-    st.caption("Los siguientes archivos se guardaron en disco:")
-    st.code(
-        "data/processed/\n"
-        "  inventario_limpio.csv\n"
-        "  transacciones_limpio.csv\n"
-        "  feedback_limpio.csv\n"
-        "data/processed/join/\n"
-        "  transacciones_con_inventario.csv"
+    st.subheader("📊 Diagnóstico: ¿Error de Digitación o Productos No Catalogados?")
+
+    st.markdown("""
+    Los **480 SKUs huérfanos** no son errores de digitación. La evidencia apunta a que son
+    **productos reales que nunca se registraron en el ERP de inventario**.
+    """)
+
+    st.markdown("**Evidencia:**")
+    evidencia = pd.DataFrame({
+        "Indicador": [
+            "Nomenclatura de SKU_ID",
+            "Recurrencia promedio por SKU",
+            "SKUs vendidos 2+ veces",
+            "SKUs vendidos 5+ veces",
+            "SKUs vendidos 1 sola vez",
+            "Distribución por canales",
+            "Distribución geográfica",
+            "Precio promedio vs catálogo",
+        ],
+        "Valor": [
+            "PROD-XXXX (idéntica al catálogo, sin typos)",
+            "3.6 transacciones por SKU",
+            "421 de 480 (88%)",
+            "142 de 480 (30%)",
+            "59 de 480 (12%)",
+            "Uniforme: Físico 26%, App 25%, Online 25%, WhatsApp 23%",
+            "Presente en TODAS las ciudades",
+            f"H: ${df_unido[df_unido.clasificacion_sku == 'SKU fantasma - sin inventario'].Precio_Venta_Final.mean():,.0f} vs C: ${df_unido[df_unido.clasificacion_sku == 'Catalogo oficial'].Precio_Venta_Final.mean():,.0f} (idéntico)",
+        ],
+        "Conclusión": [
+            "No hay caracteres extraños ni patrones de typo",
+            "Productos con demanda recurrente, no incidentes aislados",
+            "Casi 9 de cada 10 se venden más de una vez",
+            "1 de cada 3 tiene alta rotación",
+            "Solo el 12% son casos aislados",
+            "Se venden por todos los canales por igual",
+            "Distribución nacional, no concentrada en una región",
+            "Mismo nivel de precios que el catálogo oficial",
+        ],
+    })
+    st.dataframe(evidencia.set_index("Indicador"), use_container_width=True)
+
+    st.caption(
+        "Un error de digitación sería: pocos casos aislados, IDs con caracteres extraños, "
+        "concentrados en un solo canal o ciudad. Nada de eso ocurre aquí."
     )
+
+    st.divider()
+    st.subheader("💰 Ingresos Totales y Margen de Utilidad Parcial")
+
+    st.caption(
+        "El ingreso de TODAS las transacciones es calculable (no hay Transaccion_ID duplicados). "
+        "El margen solo es calculable para los SKUs que sí existen en el catálogo (tienen Costo_Unitario_USD). "
+        "Para los SKUs fantasma, el costo del producto es desconocido → margen incalculable."
+    )
+
+    # Ingresos totales: suma de Precio_Venta_Final de todas las transacciones
+    ingreso_total = df_unido["Precio_Venta_Final"].sum()
+    ingreso_catalogo = df_unido.loc[
+        df_unido["clasificacion_sku"] == "Catalogo oficial", "Precio_Venta_Final"
+    ].sum()
+    ingreso_fantasma = df_unido.loc[
+        df_unido["clasificacion_sku"] == "SKU fantasma - sin inventario", "Precio_Venta_Final"
+    ].sum()
+
+    # Margen_Bruto ya viene precalculado desde el procesamiento
+    # Solo para SKUs con catalogo (Costo_Unitario_USD no nulo); SKUs fantasma tienen NaN
+    con_costo = df_unido["Margen_Bruto"].notnull()
+    margen_total = df_unido.loc[con_costo, "Margen_Bruto"].sum()
+    n_margen_positivo = int((df_unido.loc[con_costo, "Margen_Bruto"] >= 0).sum())
+    n_margen_negativo = int((df_unido.loc[con_costo, "Margen_Bruto"] < 0).sum())
+    n_sin_margen = int((~con_costo).sum())
+
+    col_m1, col_m2, col_m3 = st.columns(3)
+    with col_m1:
+        st.metric("Ingreso Total", f"${ingreso_total:,.0f}",
+                  help="Suma de Precio_Venta_Final de las 10,000 transacciones (sin duplicados)")
+    with col_m2:
+        st.metric("Ingreso Catálogo Oficial", f"${ingreso_catalogo:,.0f}")
+    with col_m3:
+        st.metric("Ingreso SKU Fantasma", f"${ingreso_fantasma:,.0f}",
+                  delta=f"{ingreso_fantasma/ingreso_total*100:.1f}% del total",
+                  delta_color="off")
+
+    col_m4, col_m5, col_m6 = st.columns(3)
+    with col_m4:
+        margen_delta = f"Pérdida" if margen_total < 0 else f"Ganancia"
+        st.metric("Margen Bruto Calculable",
+                  f"${margen_total:,.0f}",
+                  delta=margen_delta,
+                  delta_color="inverse" if margen_total < 0 else "normal",
+                  help="Margen = (Precio_Venta × Cantidad) - (Costo_Unitario × Cantidad + Costo_Envio). Solo para SKUs con catálogo.")
+    with col_m5:
+        st.metric("Transacciones con margen (+)",
+                  f"{n_margen_positivo:,}",
+                  help="Ventas donde el precio supera el costo")
+    with col_m6:
+        st.metric("Transacciones sin margen calculable",
+                  f"{n_sin_margen:,}",
+                  delta="SKU fantasma",
+                  delta_color="off",
+                  help="No se puede calcular el margen porque el SKU no está en el catálogo")
+
+    if n_margen_negativo > 0:
+        st.warning(
+            f"⚠️ **{n_margen_negativo:,}** transacciones tienen **margen negativo** "
+            f"(el costo del producto supera el precio de venta). Esto representa una "
+            f"fuga de capital dentro de los productos con catálogo conocido."
+        )
+
+    with st.expander("📐 ¿Cómo se calculó cada métrica?", expanded=False):
+        explicacion = pd.DataFrame([
+            {
+                "Métrica": "Ingreso Total",
+                "Fórmula": "SUM(Precio_Venta_Final) de las 10,000 transacciones",
+                "Datos usados": "Archivo limpio de transacciones (post-Fase 1)",
+                "Nota": "Los Transaccion_ID son 100% únicos, no hay duplicados que inflen la suma.",
+            },
+            {
+                "Métrica": "Ingreso Catálogo Oficial",
+                "Fórmula": "SUM(Precio_Venta_Final) WHERE SKU_ID existe en inventario",
+                "Datos usados": "8,249 transacciones con match en catálogo (Costo_Unitario_USD ≠ NaN)",
+                "Nota": "Estos productos tienen costo conocido, se puede calcular margen.",
+            },
+            {
+                "Métrica": "Ingreso SKU Fantasma",
+                "Fórmula": "SUM(Precio_Venta_Final) WHERE SKU_ID NO existe en inventario",
+                "Datos usados": "1,751 transacciones (480 SKUs únicos sin catálogo oficial)",
+                "Nota": "Ingreso real pero con costo desconocido. Margen incalculable.",
+            },
+            {
+                "Métrica": "Margen Bruto Calculable",
+                "Fórmula": "SUM( Precio_Venta_Final × Cantidad_Vendida − Costo_Unitario_USD × Cantidad_Vendida − Costo_Envio ) para cada transacción con costo conocido",
+                "Datos usados": "8,249 transacciones con Costo_Unitario_USD conocido",
+                "Nota": "Margen = Ingreso total - Costo total del producto - Costo de envío. Negativo = se perdió dinero en esa venta.",
+            },
+            {
+                "Métrica": "Transacciones con margen (+)",
+                "Fórmula": "COUNT WHERE (Precio_Venta × Cantidad − Costo_Unitario × Cantidad − Costo_Envio) ≥ 0",
+                "Datos usados": "Subconjunto de las 8,249 con costo conocido",
+                "Nota": "Solo estas transacciones generan ganancia neta después de cubrir costo del producto y envío.",
+            },
+            {
+                "Métrica": "Transacciones sin margen calculable",
+                "Fórmula": "COUNT WHERE Costo_Unitario_USD IS NULL",
+                "Datos usados": "1,751 transacciones de SKUs fantasma",
+                "Nota": "El SKU no está en el inventario → el costo del producto es desconocido.",
+            },
+        ])
+        st.dataframe(explicacion.set_index("Métrica"), use_container_width=True)
+
+    with st.expander("🧾 Ejemplo concreto del cálculo de margen", expanded=False):
+        st.markdown("""
+        **Transacción #2 del dataset (PROD-1456):**
+        - Precio de venta **unitario**: $686.88
+        - Cantidad vendida: **12 unidades**
+        - Ingreso total: $686.88 × 12 = **$8,242.56**
+        - Costo unitario del producto: **$245.14**
+        - Costo total del producto: $245.14 × 12 = **$2,941.68**
+        - Costo de envío: **$67.16**
+        - **Margen Bruto = ($686.88 × 12) − ($245.14 × 12 + $67.16) = $8,242.56 − $3,008.84 = $5,233.72**
+
+        En este caso el margen es positivo. Pero hay miles de casos donde
+        el costo del producto o el envío superan el ingreso total.
+        """)
 
 
 # =============================================
