@@ -56,6 +56,16 @@ def crear_fuente_verdad(trx_limpio, inv_limpio):
            + df.loc[tiene_costo, "Costo_Envio"])
     )
 
+    # Brecha_Entrega: diferencia entre el tiempo real de entrega y lo prometido
+    # Brecha = Tiempo_Entrega_Real - Lead_Time_Dias
+    # Solo calculable para SKUs con catalogo (Lead_Time_Dias viene del inventario)
+    tiene_lead = df["Lead_Time_Dias"].notnull()
+    df["Brecha_Entrega"] = np.nan
+    df.loc[tiene_lead, "Brecha_Entrega"] = (
+        df.loc[tiene_lead, "Tiempo_Entrega_Real"].astype(float)
+        - df.loc[tiene_lead, "Lead_Time_Dias"].astype(float)
+    )
+
     return df
 
 

@@ -642,6 +642,92 @@ with tab_operaciones:
         """)
 
 
+    st.divider()
+    st.subheader("⏱️ Brecha de Entrega vs Prometido")
+
+    st.markdown("""
+    Mide la diferencia entre el tiempo real de entrega y el tiempo prometido por el proveedor.
+    Solo calculable para SKUs con catálogo (tienen `Lead_Time_Dias`).
+    """)
+
+    with st.expander("📐 ¿Cómo se calcula?", expanded=False):
+        formula = pd.DataFrame([
+            {"Variable": "Tiempo_Entrega_Real", "Origen": "transacciones", "Significado": "Días reales desde el pedido hasta la entrega al cliente"},
+            {"Variable": "Lead_Time_Dias", "Origen": "inventario", "Significado": "Días prometidos por el proveedor para reposición"},
+            {"Resultado": "Brecha_Entrega", "Fórmula": "Tiempo_Entrega_Real − Lead_Time_Dias", "Significado": "Diferencia en días: positivo = demora, negativo = adelanto"},
+        ])
+        st.dataframe(formula.set_index("Variable"), use_container_width=True)
+
+    with st.expander("📖 ¿Cómo interpretarla?", expanded=False):
+        interpretacion = pd.DataFrame([
+            {"Brecha": "Positiva (+)", "Resultado": "> 0", "Significado": "La entrega tardó MÁS de lo prometido → incumplimiento logístico"},
+            {"Brecha": "Negativa (−)", "Resultado": "< 0", "Significado": "La entrega fue MÁS RÁPIDA de lo prometido → sobrecumplimiento, operación eficiente"},
+            {"Brecha": "Cero", "Resultado": "= 0", "Significado": "Exactamente lo prometido"},
+        ])
+        st.dataframe(interpretacion.set_index("Brecha"), use_container_width=True)
+
+    # KPI global
+    con_brecha = df_unido["Brecha_Entrega"].notnull()
+    brecha_promedio = df_unido.loc[con_brecha, "Brecha_Entrega"].mean()
+    brecha_std = df_unido.loc[con_brecha, "Brecha_Entrega"].std()
+
+    col_b1, col_b2, col_b3 = st.columns(3)
+    with col_b1:
+        st.metric("Brecha promedio global", f"{brecha_promedio:+.1f} días",
+                  help="Promedio de Tiempo_Entrega_Real − Lead_Time_Dias. Negativo = se entrega antes de lo prometido.")
+    with col_b2:
+        st.metric("Transacciones con brecha calculable", f"{con_brecha.sum():,.0f}",
+                  help="Solo SKUs con catálogo tienen Lead_Time_Dias conocido.")
+    with col_b3:
+        pct_cumplen = int((df_unido.loc[con_brecha, "Brecha_Entrega"] <= 0).sum() / con_brecha.sum() * 100)
+        st.metric("% que cumple o adelanta", f"{pct_cumplen}%",
+                  help="Porcentaje de entregas que llegaron a tiempo o antes de lo prometido.")
+
+    st.divider()
+    st.markdown("**Promedios por dimensión:**")
+
+    tab_ciudad, tab_bodega, tab_cat = st.tabs(["Por Ciudad", "Por Bodega", "Por Categoría"])
+
+    def _tabla_brecha(df, grupo_col, nombre_col):
+        resumen = df.dropna(subset=["Brecha_Entrega"]).groupby(grupo_col).agg(
+            Transacciones=("Transaccion_ID", "count"),
+            Brecha_Promedio=("Brecha_Entrega", "mean"),
+            Desviacion=("Brecha_Entrega", "std"),
+            Min=("Brecha_Entrega", "min"),
+            Max=("Brecha_Entrega", "max"),
+        ).reset_index()
+        resumen.columns = [nombre_col, "Transacciones", "Brecha Promedio", "Desviación", "Mín", "Máx"]
+        resumen = resumen.sort_values("Brecha Promedio")
+        for c in ["Brecha Promedio", "Desviación", "Mín", "Máx"]:
+            resumen[c] = resumen[c].round(1)
+        resumen["Transacciones"] = resumen["Transacciones"].astype(int)
+        return resumen
+
+    with tab_ciudad:
+        resumen_ciudad = _tabla_brecha(df_unido, "Ciudad_Destino", "Ciudad")
+        mejor = resumen_ciudad.iloc[0]
+        peor = resumen_ciudad.iloc[-1]
+        st.caption(f"🏆 Mejor: **{mejor['Ciudad']}** ({mejor['Brecha Promedio']:+.1f} días) | ⚠️ Peor: **{peor['Ciudad']}** ({peor['Brecha Promedio']:+.1f} días)")
+        st.dataframe(resumen_ciudad.set_index("Ciudad"), use_container_width=True)
+        st.bar_chart(resumen_ciudad.set_index("Ciudad")["Brecha Promedio"], x_label="Ciudad", y_label="Brecha Promedio (días)")
+
+    with tab_bodega:
+        resumen_bodega = _tabla_brecha(df_unido, "Bodega_Origen", "Bodega")
+        mejor = resumen_bodega.iloc[0]
+        peor = resumen_bodega.iloc[-1]
+        st.caption(f"🏆 Mejor: **{mejor['Bodega']}** ({mejor['Brecha Promedio']:+.1f} días) | ⚠️ Peor: **{peor['Bodega']}** ({peor['Brecha Promedio']:+.1f} días)")
+        st.dataframe(resumen_bodega.set_index("Bodega"), use_container_width=True)
+        st.bar_chart(resumen_bodega.set_index("Bodega")["Brecha Promedio"], x_label="Bodega", y_label="Brecha Promedio (días)")
+
+    with tab_cat:
+        resumen_cat = _tabla_brecha(df_unido, "Categoria", "Categoría")
+        mejor = resumen_cat.iloc[0]
+        peor = resumen_cat.iloc[-1]
+        st.caption(f"🏆 Mejor: **{mejor['Categoría']}** ({mejor['Brecha Promedio']:+.1f} días) | ⚠️ Peor: **{peor['Categoría']}** ({peor['Brecha Promedio']:+.1f} días)")
+        st.dataframe(resumen_cat.set_index("Categoría"), use_container_width=True)
+        st.bar_chart(resumen_cat.set_index("Categoría")["Brecha Promedio"], x_label="Categoría", y_label="Brecha Promedio (días)")
+
+
 # =============================================
 # TAB 4: CLIENTE (placeholder Fase 2)
 # =============================================
