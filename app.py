@@ -642,8 +642,11 @@ with tab_operaciones:
         """)
 
 
-    st.divider()
-    st.subheader("⏱️ Brecha de Entrega vs Prometido")
+# =============================================
+# TAB 4: CLIENTE (Fase 2)
+# =============================================
+with tab_cliente:
+    st.header("👤 Cliente — Brecha de Entrega vs Prometido")
 
     st.markdown("""
     Mide la diferencia entre el tiempo real de entrega y el tiempo prometido por el proveedor.
@@ -666,10 +669,8 @@ with tab_operaciones:
         ])
         st.dataframe(interpretacion.set_index("Brecha"), use_container_width=True)
 
-    # KPI global
     con_brecha = df_unido["Brecha_Entrega"].notnull()
     brecha_promedio = df_unido.loc[con_brecha, "Brecha_Entrega"].mean()
-    brecha_std = df_unido.loc[con_brecha, "Brecha_Entrega"].std()
 
     col_b1, col_b2, col_b3 = st.columns(3)
     with col_b1:
@@ -727,14 +728,124 @@ with tab_operaciones:
         st.dataframe(resumen_cat.set_index("Categoría"), use_container_width=True)
         st.bar_chart(resumen_cat.set_index("Categoría")["Brecha Promedio"], x_label="Categoría", y_label="Brecha Promedio (días)")
 
+    st.divider()
+    st.subheader("🎫 Ratio de Soporte por Categoría")
 
-# =============================================
-# TAB 4: CLIENTE (placeholder Fase 2)
-# =============================================
-with tab_cliente:
-    st.header("👤 Cliente — Fase 2 (Integración)")
-    st.info("Módulo en desarrollo. Aquí se mostrarán: Satisfacción NPS, Tickets de Soporte, Ratings por categoría, etc.")
-    st.caption(f"Datos disponibles: {len(fb_limpio):,} registros de feedback.")
+    st.markdown("""
+    Mide qué porcentaje de transacciones por categoría generaron un ticket de soporte.
+    Un ratio alto indica problemas de calidad del producto o insatisfacción del cliente.
+    """)
+
+    with st.expander("📐 ¿Cómo se calcula?", expanded=False):
+        formula_ticket = pd.DataFrame([
+            {"Paso": "1", "Acción": "Del feedback, agrupar por Transaccion_ID: ¿algún registro tiene Ticket_Soporte_Abierto = 'Sí'?"},
+            {"Paso": "2", "Acción": "Cruzar con transacciones_con_inventario (por Transaccion_ID, 1:1 sin duplicados)"},
+            {"Paso": "3", "Acción": "Agrupar por Categoria o Bodega_Origen"},
+            {"Paso": "4", "Acción": "Ratio = COUNT(Ticket_Sí) / COUNT(Total_Transacciones) × 100"},
+        ])
+        st.dataframe(formula_ticket.set_index("Paso"), use_container_width=True)
+
+    # Agregar feedback: por Transaccion_ID, si existe algun ticket
+    fb_agg = fb_limpio.groupby("Transaccion_ID").agg(
+        Tiene_Ticket=("Ticket_Soporte_Abierto", lambda x: int((x == "Sí").any())),
+    ).reset_index()
+
+    # Cruzar 1:1 con df_unido
+    df_ticket = df_unido.merge(fb_agg, on="Transaccion_ID", how="left")
+    df_ticket["Tiene_Ticket"] = df_ticket["Tiene_Ticket"].fillna(0).astype(int)
+    df_ticket["Tiene_Ticket"] = df_ticket["Tiene_Ticket"].map({1: "Con ticket", 0: "Sin ticket"})
+
+    # Ratio por categoria
+    ticket_cat = df_ticket.groupby("Categoria").agg(
+        Total=("Transaccion_ID", "count"),
+        Con_Ticket=("Tiene_Ticket", lambda x: (x == "Con ticket").sum()),
+    ).reset_index()
+    ticket_cat["Ratio_Tickets_%"] = (ticket_cat["Con_Ticket"] / ticket_cat["Total"] * 100).round(1)
+    ticket_cat = ticket_cat.sort_values("Ratio_Tickets_%", ascending=False)
+
+    # Ratio por bodega
+    ticket_bodega = df_ticket.groupby("Bodega_Origen").agg(
+        Total=("Transaccion_ID", "count"),
+        Con_Ticket=("Tiene_Ticket", lambda x: (x == "Con ticket").sum()),
+    ).reset_index()
+    ticket_bodega["Ratio_Tickets_%"] = (ticket_bodega["Con_Ticket"] / ticket_bodega["Total"] * 100).round(1)
+    ticket_bodega = ticket_bodega.sort_values("Ratio_Tickets_%", ascending=False)
+
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.markdown("**Por Categoría**")
+        st.dataframe(
+            ticket_cat.set_index("Categoria"),
+            use_container_width=True,
+            column_config={
+                "Total": "Total ventas",
+                "Con_Ticket": "Con ticket",
+                "Ratio_Tickets_%": st.column_config.NumberColumn("Ratio %", format="%.1f%%"),
+            },
+        )
+        peor_ticket = ticket_cat.iloc[0]
+        st.warning(f"🚨 Mayor ratio: **{peor_ticket['Categoria']}** ({peor_ticket['Ratio_Tickets_%']}% de {int(peor_ticket['Total'])} ventas)")
+
+    with col_t2:
+        st.markdown("**Por Bodega**")
+        st.dataframe(
+            ticket_bodega.set_index("Bodega_Origen"),
+            use_container_width=True,
+            column_config={
+                "Total": "Total ventas",
+                "Con_Ticket": "Con ticket",
+                "Ratio_Tickets_%": st.column_config.NumberColumn("Ratio %", format="%.1f%%"),
+            },
+        )
+        peor_bodega = ticket_bodega.iloc[0]
+        st.warning(f"🚨 Mayor ratio: **{peor_bodega['Bodega_Origen']}** ({peor_bodega['Ratio_Tickets_%']}% de {int(peor_bodega['Total'])} ventas)")
+
+    st.divider()
+    st.subheader("🕐 Antigüedad de Revisión vs Tickets de Soporte")
+
+    st.markdown("""
+    Relación entre cuándo fue la última revisión de inventario y la tasa de tickets.
+    Bodegas con revisiones muy antiguas pueden estar operando con datos desactualizados,
+    generando más reclamos de clientes.
+    """)
+
+    # Antigüedad en dias desde Ultima_Revision hasta hoy
+    hoy = pd.Timestamp.today()
+    df_ticket["Antiguedad_Revision_Dias"] = (hoy - df_ticket["Ultima_Revision"]).dt.days
+
+    # Agrupar por bodega: antiguedad promedio vs ratio de tickets
+    riesgo_bodega = df_ticket.groupby("Bodega_Origen").agg(
+        Total_Ventas=("Transaccion_ID", "count"),
+        Antiguedad_Promedio=("Antiguedad_Revision_Dias", "mean"),
+        Con_Ticket=("Tiene_Ticket", lambda x: (x == "Con ticket").sum()),
+    ).reset_index()
+    riesgo_bodega["Ratio_Tickets_%"] = (riesgo_bodega["Con_Ticket"] / riesgo_bodega["Total_Ventas"] * 100).round(1)
+    riesgo_bodega["Antiguedad_Promedio"] = riesgo_bodega["Antiguedad_Promedio"].round(0).astype(int)
+
+    col_r1, col_r2 = st.columns([2, 1])
+    with col_r1:
+        st.dataframe(
+            riesgo_bodega.set_index("Bodega_Origen"),
+            use_container_width=True,
+            column_config={
+                "Total_Ventas": "Ventas",
+                "Antiguedad_Promedio": st.column_config.NumberColumn("Antigüedad (días)", format="%d"),
+                "Con_Ticket": "Con ticket",
+                "Ratio_Tickets_%": st.column_config.NumberColumn("Ratio Tickets %", format="%.1f%%"),
+            },
+        )
+
+    with col_r2:
+        bodegas_riesgo = riesgo_bodega[riesgo_bodega["Antiguedad_Promedio"] > 365]
+        if len(bodegas_riesgo) > 0:
+            st.warning(
+                f"⚠️ **{len(bodegas_riesgo)} bodega(s)** tienen más de 1 año sin revisión:\n\n" +
+                "\n".join(f"- **{r['Bodega_Origen']}**: {r['Antiguedad_Promedio']} días, "
+                          f"{r['Ratio_Tickets_%']}% tickets"
+                          for _, r in bodegas_riesgo.iterrows())
+            )
+        else:
+            st.success("Ninguna bodega supera 1 año sin revisión.")
 
 
 # =============================================
