@@ -14,6 +14,7 @@ from src.procesamiento import (
     guardar_limpios, crear_fuente_verdad, guardar_fuente_verdad,
     resumen_huerfanos,
 )
+from src.ia import construir_resumen_estadistico, consultar_llama
 
 
 def _filtrar_outliers_dominio(df, columna, info):
@@ -849,8 +850,92 @@ with tab_cliente:
 
 
 # =============================================
-# TAB 5: INSIGHTS IA (placeholder Fase 3)
+# TAB 5: INSIGHTS IA (Fase 3)
 # =============================================
 with tab_ia:
-    st.header("🤖 Insights IA — Fase 3 (Groq + Llama-3)")
-    st.info("Módulo en desarrollo. Integración con Groq para recomendaciones estratégicas en tiempo real.")
+    st.header("🤖 Insights IA — Groq + Llama-3")
+
+    st.markdown("""
+    El modelo **Llama-3 (70B)** recibe un resumen estadístico con todos los hallazgos 
+    de las Fases 1 y 2 (auditoría, operaciones, cliente) y genera **recomendaciones 
+    estratégicas** en tiempo real para la junta directiva de TechLogistics S.A.S.
+    """)
+
+    if st.button("🚀 Generar Análisis Estratégico con Llama-3", type="primary", use_container_width=True):
+        with st.spinner("Llama-3 está analizando los datos de TechLogistics..."):
+
+            # Preparar brecha por ciudad
+            con_brecha = df_unido["Brecha_Entrega"].notnull()
+            brecha_promedio = df_unido.loc[con_brecha, "Brecha_Entrega"].mean()
+            pct_cumplen = int((df_unido.loc[con_brecha, "Brecha_Entrega"] <= 0).sum() / con_brecha.sum() * 100)
+
+            brecha_ciudad = df_unido.dropna(subset=["Brecha_Entrega"]).groupby("Ciudad_Destino").agg(
+                Transacciones=("Transaccion_ID", "count"),
+                Brecha_Promedio=("Brecha_Entrega", "mean"),
+            ).reset_index().sort_values("Brecha_Promedio")
+            brecha_ciudad["Transacciones"] = brecha_ciudad["Transacciones"].astype(int)
+            brecha_ciudad["Brecha_Promedio"] = brecha_ciudad["Brecha_Promedio"].round(1)
+
+            # Datos de margen
+            con_costo = df_unido["Margen_Bruto"].notnull()
+            margen_total = df_unido.loc[con_costo, "Margen_Bruto"].sum()
+            n_margen_positivo = int((df_unido.loc[con_costo, "Margen_Bruto"] >= 0).sum())
+            n_margen_negativo = int((df_unido.loc[con_costo, "Margen_Bruto"] < 0).sum())
+            n_sin_margen = int((~con_costo).sum())
+
+            # Datos de tickets
+            fb_agg = fb_limpio.groupby("Transaccion_ID").agg(
+                Tiene_Ticket=("Ticket_Soporte_Abierto", lambda x: int((x == "Sí").any())),
+            ).reset_index()
+            df_ticket = df_unido.merge(fb_agg, on="Transaccion_ID", how="left")
+            df_ticket["Tiene_Ticket"] = df_ticket["Tiene_Ticket"].fillna(0).astype(int)
+
+            ticket_cat = df_ticket.groupby("Categoria").agg(
+                Total=("Transaccion_ID", "count"),
+                Con_Ticket=("Tiene_Ticket", "sum"),
+            ).reset_index()
+            ticket_cat["Ratio_Tickets_%"] = (ticket_cat["Con_Ticket"] / ticket_cat["Total"] * 100).round(1)
+            ticket_cat["Categoria"] = ticket_cat["Categoria"].fillna("Sin especificar")
+
+            ticket_bodega = df_ticket.groupby("Bodega_Origen").agg(
+                Total=("Transaccion_ID", "count"),
+                Con_Ticket=("Tiene_Ticket", "sum"),
+            ).reset_index()
+            ticket_bodega["Ratio_Tickets_%"] = (ticket_bodega["Con_Ticket"] / ticket_bodega["Total"] * 100).round(1)
+            ticket_bodega["Bodega_Origen"] = ticket_bodega["Bodega_Origen"].fillna("Sin bodega")
+
+            hoy = pd.Timestamp.today()
+            df_ticket["Antiguedad_Revision_Dias"] = (hoy - df_ticket["Ultima_Revision"]).dt.days
+            riesgo_bodega = df_ticket.groupby("Bodega_Origen").agg(
+                Antiguedad_Promedio=("Antiguedad_Revision_Dias", "mean"),
+                Total_Ventas=("Transaccion_ID", "count"),
+                Con_Ticket=("Tiene_Ticket", "sum"),
+            ).reset_index()
+            riesgo_bodega["Ratio_Tickets_%"] = (riesgo_bodega["Con_Ticket"] / riesgo_bodega["Total_Ventas"] * 100).round(1)
+            riesgo_bodega["Antiguedad_Promedio"] = riesgo_bodega["Antiguedad_Promedio"].round(0).astype(int)
+
+            # Construir prompt y consultar
+            prompt = construir_resumen_estadistico(
+                auditoria, info_huerfanos, margen_total, n_margen_positivo,
+                n_margen_negativo, n_sin_margen, brecha_promedio, pct_cumplen,
+                brecha_ciudad, ticket_cat, ticket_bodega, riesgo_bodega,
+            )
+
+            with st.expander("📊 Ver resumen estadístico enviado a Llama-3", expanded=False):
+                st.code(prompt, language="text")
+
+            respuesta = consultar_llama(prompt)
+
+        if respuesta.startswith("Error") or respuesta.startswith("[ERROR]"):
+            st.error(respuesta)
+        else:
+            st.success("✅ Análisis completado por Llama-3")
+            st.markdown("### 📋 Recomendaciones Estratégicas")
+            st.markdown(respuesta)
+            st.caption(
+                "Análisis generado por Llama-3 70B vía Groq. "
+                "Basado exclusivamente en los datos estadísticos "
+                "extraídos de las 10,000 transacciones de TechLogistics S.A.S."
+            )
+    else:
+        st.info("Hacé clic en el botón para que Llama-3 analice todos los hallazgos y genere recomendaciones estratégicas.")
