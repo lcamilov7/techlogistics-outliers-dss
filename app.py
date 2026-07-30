@@ -1160,23 +1160,28 @@ with tab_reto:
     nps_agg.columns = ["Transaccion_ID", "NPS_Promedio"]
     df_nps = df_unido.merge(nps_agg, on="Transaccion_ID", how="inner")
 
-    # Por ciudad
-    ciudad_nps = df_nps.groupby("Ciudad_Destino").agg(
-        Tiempo_Entrega=("Tiempo_Entrega_Real", "mean"),
+    # Por ciudad (con brecha calculable)
+    con_brecha_p2 = df_nps["Brecha_Entrega"].notnull()
+    ciudad_nps = df_nps[con_brecha_p2].groupby("Ciudad_Destino").agg(
+        Prometido=("Lead_Time_Dias", "mean"),
+        Real=("Tiempo_Entrega_Real", "mean"),
+        Brecha=("Brecha_Entrega", "mean"),
         NPS=("NPS_Promedio", "mean"),
         Ventas=("Transaccion_ID", "count"),
     ).reset_index().sort_values("NPS")
-    ciudad_nps["Tiempo_Entrega"] = ciudad_nps["Tiempo_Entrega"].round(1)
-    ciudad_nps["NPS"] = ciudad_nps["NPS"].round(1)
+    for c in ["Prometido", "Real", "Brecha", "NPS"]:
+        ciudad_nps[c] = ciudad_nps[c].round(1)
 
-    # Por bodega
-    bodega_nps = df_nps.groupby("Bodega_Origen").agg(
-        Tiempo_Entrega=("Tiempo_Entrega_Real", "mean"),
+    # Por bodega (con brecha calculable)
+    bodega_nps = df_nps[con_brecha_p2].groupby("Bodega_Origen").agg(
+        Prometido=("Lead_Time_Dias", "mean"),
+        Real=("Tiempo_Entrega_Real", "mean"),
+        Brecha=("Brecha_Entrega", "mean"),
         NPS=("NPS_Promedio", "mean"),
         Ventas=("Transaccion_ID", "count"),
     ).reset_index().sort_values("NPS")
-    bodega_nps["Tiempo_Entrega"] = bodega_nps["Tiempo_Entrega"].round(1)
-    bodega_nps["NPS"] = bodega_nps["NPS"].round(1)
+    for c in ["Prometido", "Real", "Brecha", "NPS"]:
+        bodega_nps[c] = bodega_nps[c].round(1)
 
     st.divider()
     st.markdown("**NPS vs Tiempo de Entrega por Ciudad**")
@@ -1185,18 +1190,26 @@ with tab_reto:
     with col_c1:
         st.scatter_chart(
             ciudad_nps,
-            x="Tiempo_Entrega",
+            x="Real",
             y="NPS",
-            x_label="Tiempo Entrega (días)",
+            x_label="Tiempo Entrega Real (días)",
             y_label="NPS Promedio",
             size="Ventas",
         )
     with col_c2:
+        st.caption(
+            "**Prometido** = Lead_Time_Dias promedio de los productos comprados en esa ciudad. "
+            "No es una promesa de la ciudad, sino el tiempo de reposición del proveedor "
+            "para esos productos. La variación entre ciudades es mínima (~8 días en todas). "
+            "**Real** = Tiempo_Entrega_Real promedio. La variación AQUÍ es donde está el problema."
+        )
         st.dataframe(
             ciudad_nps.set_index("Ciudad_Destino"),
             use_container_width=True,
             column_config={
-                "Tiempo_Entrega": st.column_config.NumberColumn("Tiempo Entrega", format="%.1f"),
+                "Prometido": st.column_config.NumberColumn("Prometido", format="%.1f"),
+                "Real": st.column_config.NumberColumn("Real", format="%.1f"),
+                "Brecha": st.column_config.NumberColumn("Brecha", format="%.1f"),
                 "NPS": st.column_config.NumberColumn("NPS", format="%.1f"),
                 "Ventas": "Ventas",
             },
@@ -1204,8 +1217,8 @@ with tab_reto:
         peor_ciudad = ciudad_nps.iloc[0]
         st.warning(
             f"🚨 **{peor_ciudad['Ciudad_Destino']}**: NPS {peor_ciudad['NPS']:.1f}, "
-            f"entrega {peor_ciudad['Tiempo_Entrega']} días. "
-            f"Requiere cambio inmediato de operador."
+            f"prometió {peor_ciudad['Prometido']} días, entregó en {peor_ciudad['Real']} "
+            f"(brecha +{peor_ciudad['Brecha']}). Requiere cambio inmediato."
         )
 
     st.divider()
@@ -1215,18 +1228,24 @@ with tab_reto:
     with col_b1:
         st.scatter_chart(
             bodega_nps,
-            x="Tiempo_Entrega",
+            x="Real",
             y="NPS",
-            x_label="Tiempo Entrega (días)",
+            x_label="Tiempo Entrega Real (días)",
             y_label="NPS Promedio",
             size="Ventas",
         )
     with col_b2:
+        st.caption(
+            "**Prometido** y **Real** son promedios de los productos que despacha cada bodega. "
+            "La brecha es sistémica: todas prometen ~8 días y entregan ~15 días."
+        )
         st.dataframe(
             bodega_nps.set_index("Bodega_Origen"),
             use_container_width=True,
             column_config={
-                "Tiempo_Entrega": st.column_config.NumberColumn("Tiempo Entrega", format="%.1f"),
+                "Prometido": st.column_config.NumberColumn("Prometido", format="%.1f"),
+                "Real": st.column_config.NumberColumn("Real", format="%.1f"),
+                "Brecha": st.column_config.NumberColumn("Brecha", format="%.1f"),
                 "NPS": st.column_config.NumberColumn("NPS", format="%.1f"),
                 "Ventas": "Ventas",
             },
@@ -1234,9 +1253,8 @@ with tab_reto:
         peor_bodega = bodega_nps.iloc[0]
         st.warning(
             f"🚨 **{peor_bodega['Bodega_Origen']}**: NPS {peor_bodega['NPS']:.1f}, "
-            f"entrega {peor_bodega['Tiempo_Entrega']} días, "
-            f"{int(peor_bodega['Ventas'])} ventas. "
-            f"Es la bodega con mayor volumen y peor satisfacción."
+            f"prometió {peor_bodega['Prometido']} días, entregó en {peor_bodega['Real']} "
+            f"(brecha +{peor_bodega['Brecha']}). Es la bodega con mayor volumen y peor satisfacción."
         )
 
     st.divider()
@@ -1244,19 +1262,137 @@ with tab_reto:
 
     mejor_ciudad = ciudad_nps.iloc[-1]
     mejor_bodega = bodega_nps.iloc[-1]
+    prom_brecha = bodega_nps["Brecha"].mean()
+    prom_prometido = bodega_nps["Prometido"].mean()
+    prom_real = bodega_nps["Real"].mean()
 
     st.error(
-        f"**Ventas_Web** es la zona más crítica: tiene el peor NPS ({ciudad_nps.iloc[0]['NPS']:.1f}) "
-        f"y el tiempo de entrega más alto ({ciudad_nps.iloc[0]['Tiempo_Entrega']} días). "
+        f"**Ventas_Web** es la zona más crítica: NPS {ciudad_nps.iloc[0]['NPS']:.1f}, "
+        f"tiempo real {ciudad_nps.iloc[0]['Real']} días. "
         f"Requiere un cambio inmediato de operador logístico.\n\n"
-        f"**Bodega Norte** es la prioridad entre las bodegas: con {int(peor_bodega['Ventas'])} ventas "
-        f"(la de mayor volumen), su NPS es de solo {peor_bodega['NPS']:.1f}. "
+        f"**El Lead_Time_Dias es una propiedad del producto, no de la ubicación.** "
+        f"Por eso todas las zonas tienen un Prometido similar (~{prom_prometido:.0f} días): "
+        f"venden la misma mezcla de productos. "
+        f"Pero el tiempo de entrega REAL varía mucho (de {ciudad_nps.iloc[-1]['Real']} a {ciudad_nps.iloc[0]['Real']} días). "
+        f"El cuello de botella es LOGÍSTICO: la promesa es consistente, la ejecución no.\n\n"
+        f"Todas las bodegas entregan ~{prom_real:.0f} días (brecha promedio de +{prom_brecha:.0f}). "
+        f"El incumplimiento es SISTÉMICO, no de una bodega puntual. "
+        f"Por eso la brecha no diferencia el NPS: todos incumplen por igual.\n\n"
+        f"Lo que SÍ diferencia el NPS es el **tiempo absoluto de entrega**: "
+        f"**{mejor_ciudad['Ciudad_Destino']}** ({mejor_ciudad['Real']} días → NPS +{mejor_ciudad['NPS']:.1f}) "
+        f"vs **{ciudad_nps.iloc[0]['Ciudad_Destino']}** ({ciudad_nps.iloc[0]['Real']} días → NPS {ciudad_nps.iloc[0]['NPS']:.1f}). "
+        f"Reducir 2 días el tiempo real duplica el NPS.\n\n"
+        f"**Bodega Norte** es la prioridad: con {int(peor_bodega['Ventas'])} ventas (la de mayor volumen), "
+        f"promete {peor_bodega['Prometido']} días pero entrega en {peor_bodega['Real']} (brecha +{peor_bodega['Brecha']}). "
+        f"Su NPS es de solo {peor_bodega['NPS']:.1f}. "
         f"Cualquier mejora aquí impacta desproporcionadamente la satisfacción global.\n\n"
-        f"**BOD-EXT-99** es un caso atípico positivo: aunque su tiempo de entrega es alto "
-        f"({mejor_bodega['Tiempo_Entrega']} días), tiene el mejor NPS (+{mejor_bodega['NPS']:.1f}). "
-        f"Algo están haciendo bien en servicio al cliente que compensa la demora logística. "
-        f"Estudiar sus prácticas para replicarlas.\n\n"
-        f"En el otro extremo, **{mejor_ciudad['Ciudad_Destino']}** y **Bodega Sur** "
-        f"demuestran que entregar rápido ({mejor_ciudad['Tiempo_Entrega']} y {bodega_nps.iloc[-2]['Tiempo_Entrega']} días) "
-        f"se correlaciona con NPS positivo (+{mejor_ciudad['NPS']:.1f} y +{bodega_nps.iloc[-2]['NPS']:.1f})."
+        f"**BOD-EXT-99** es un caso atípico: entrega en {mejor_bodega['Real']} días "
+        f"(prometió {mejor_bodega['Prometido']}) pero tiene NPS +{mejor_bodega['NPS']:.1f}. "
+        f"Estudiar sus prácticas de servicio al cliente para replicarlas."
+    )
+
+    # =============================================
+    # PREGUNTA 3
+    # =============================================
+    st.divider()
+    st.subheader("3. Análisis de la Venta Invisible")
+    st.markdown("""
+    **Pregunta:** Cuantifique el impacto financiero (en USD) de las ventas cuyos SKUs
+    no están en el maestro de inventario. ¿Qué porcentaje del ingreso total está en
+    riesgo por falta de control de inventario?
+    """)
+
+    fant = df_unido[df_unido["clasificacion_sku"] == "SKU fantasma - sin inventario"]
+    cat = df_unido[df_unido["clasificacion_sku"] == "Catalogo oficial"]
+
+    col_i1, col_i2, col_i3, col_i4 = st.columns(4)
+    with col_i1:
+        st.metric("SKUs huérfanos", f"{info_huerfanos['skus_huerfanos_unicos']}",
+                  help="Productos con ventas registradas pero sin ficha en el catálogo de inventario.")
+    with col_i2:
+        st.metric("Ventas afectadas", f"{info_huerfanos['transacciones_huerfanas']:,}",
+                  delta=f"{info_huerfanos['pct_huerfanas']}% del total",
+                  delta_color="off")
+    with col_i3:
+        st.metric("Ingreso en riesgo", f"USD {info_huerfanos['ingreso_huerfano_usd']:,.0f}",
+                  delta=f"{info_huerfanos['pct_ingreso_en_riesgo']}% del total",
+                  delta_color="off")
+    with col_i4:
+        st.metric("Costo de estos productos", "Desconocido",
+                  delta="Sin dato en ERP",
+                  delta_color="off")
+
+    st.divider()
+    st.markdown("**Distribución por canal** — las ventas invisibles no son un problema de un solo canal")
+
+    fant_canal = fant.groupby("Canal_Venta").agg(
+        Ventas=("Transaccion_ID", "count"),
+        Ingreso=("Precio_Venta_Final", "sum"),
+    ).reset_index()
+    fant_canal["Pct"] = (fant_canal["Ingreso"] / fant_canal["Ingreso"].sum() * 100).round(1)
+
+    col_fc1, col_fc2 = st.columns([2, 1])
+    with col_fc1:
+        st.bar_chart(fant_canal.set_index("Canal_Venta")["Ingreso"],
+                     x_label="Canal", y_label="Ingreso de SKUs Huérfanos (USD)")
+    with col_fc2:
+        st.dataframe(
+            fant_canal.set_index("Canal_Venta"),
+            use_container_width=True,
+            column_config={
+                "Ventas": "Ventas",
+                "Ingreso": st.column_config.NumberColumn("Ingreso", format="USD %.0f"),
+                "Pct": st.column_config.NumberColumn("%", format="%.1f%%"),
+            },
+        )
+        st.caption(
+            "Los 4 canales tienen entre 24% y 26% de las ventas invisibles cada uno. "
+            "No hay un canal más afectado que otro."
+        )
+
+    st.divider()
+    st.markdown("**Distribución por ciudad**")
+
+    fant_ciudad = fant.groupby("Ciudad_Destino").agg(
+        Ventas=("Transaccion_ID", "count"),
+        Ingreso=("Precio_Venta_Final", "sum"),
+    ).reset_index().sort_values("Ingreso", ascending=False)
+
+    col_fci1, col_fci2 = st.columns([2, 1])
+    with col_fci1:
+        st.bar_chart(fant_ciudad.set_index("Ciudad_Destino")["Ingreso"],
+                     x_label="Ciudad", y_label="Ingreso de SKUs Huérfanos (USD)")
+    with col_fci2:
+        st.dataframe(
+            fant_ciudad.set_index("Ciudad_Destino"),
+            use_container_width=True,
+            column_config={
+                "Ventas": "Ventas",
+                "Ingreso": st.column_config.NumberColumn("Ingreso", format="USD %.0f"),
+            },
+        )
+        st.caption(
+            "Medellín y Bogotá concentran la mayor cantidad de ventas invisibles "
+            "por su volumen, pero todas las ciudades tienen presencia de SKUs huérfanos."
+        )
+
+    st.divider()
+    st.subheader("📋 Conclusión")
+
+    st.error(
+        f"**USD {info_huerfanos['ingreso_huerfano_usd']:,.0f} en ingresos —el {info_huerfanos['pct_ingreso_en_riesgo']}% del total— "
+        f"provienen de {info_huerfanos['skus_huerfanos_unicos']} SKUs que NO existen en el catálogo de inventario.**\n\n"
+        f"Estas {info_huerfanos['transacciones_huerfanas']:,} ventas generan ingreso real, "
+        f"pero su costo es un agujero negro: sin Costo_Unitario_USD, "
+        f"es imposible calcular si la empresa gana o pierde dinero con ellas.\n\n"
+        f"El problema NO está concentrado en un canal o ciudad específica — "
+        f"las ventas invisibles se distribuyen uniformemente en los 4 canales (~25% cada uno) "
+        f"y en todas las ciudades. Esto descarta un error de captura localizado y apunta a "
+        f"una **falla sistémica en el registro de productos**: cuando un SKU nuevo entra "
+        f"al portafolio, no se da de alta en el ERP de inventario.\n\n"
+        f"**Recomendación:** Auditar los {info_huerfanos['skus_huerfanos_unicos']} SKUs huérfanos, "
+        f"registrarlos en el maestro de inventario con su costo de adquisición, "
+        f"y establecer un proceso obligatorio de alta en el ERP antes de la primera venta. "
+        f"Esto recuperaría trazabilidad sobre USD {info_huerfanos['ingreso_huerfano_usd']:,.0f} "
+        f"en ingresos anuales."
     )
