@@ -1138,3 +1138,125 @@ with tab_reto:
         "Evaluar si los costos de adquisición reportados en el ERP son reales o si los "
         "precios de venta están anclados por debajo del mercado en todos los segmentos."
     )
+
+    # =============================================
+    # PREGUNTA 2
+    # =============================================
+    st.divider()
+    st.subheader("2. Crisis Logística y Cuellos de Botella")
+    st.markdown("""
+    **Pregunta:** ¿En qué ciudades y bodegas la correlación entre Tiempo de Entrega
+    y NPS bajo es más fuerte? Identifique la zona que requiere un cambio inmediato
+    de operador.
+    """)
+
+    st.caption(
+        "Se agregó el NPS promedio por Transaccion_ID desde feedback (sin duplicar filas). "
+        "Se cruzó 1:1 con la fuente única de verdad para obtener Tiempo_Entrega_Real y ubicación."
+    )
+
+    # Agregar NPS desde feedback (sin duplicar)
+    nps_agg = fb_limpio.groupby("Transaccion_ID")["Satisfaccion_NPS"].mean().reset_index()
+    nps_agg.columns = ["Transaccion_ID", "NPS_Promedio"]
+    df_nps = df_unido.merge(nps_agg, on="Transaccion_ID", how="inner")
+
+    # Por ciudad
+    ciudad_nps = df_nps.groupby("Ciudad_Destino").agg(
+        Tiempo_Entrega=("Tiempo_Entrega_Real", "mean"),
+        NPS=("NPS_Promedio", "mean"),
+        Ventas=("Transaccion_ID", "count"),
+    ).reset_index().sort_values("NPS")
+    ciudad_nps["Tiempo_Entrega"] = ciudad_nps["Tiempo_Entrega"].round(1)
+    ciudad_nps["NPS"] = ciudad_nps["NPS"].round(1)
+
+    # Por bodega
+    bodega_nps = df_nps.groupby("Bodega_Origen").agg(
+        Tiempo_Entrega=("Tiempo_Entrega_Real", "mean"),
+        NPS=("NPS_Promedio", "mean"),
+        Ventas=("Transaccion_ID", "count"),
+    ).reset_index().sort_values("NPS")
+    bodega_nps["Tiempo_Entrega"] = bodega_nps["Tiempo_Entrega"].round(1)
+    bodega_nps["NPS"] = bodega_nps["NPS"].round(1)
+
+    st.divider()
+    st.markdown("**NPS vs Tiempo de Entrega por Ciudad**")
+
+    col_c1, col_c2 = st.columns([3, 2])
+    with col_c1:
+        st.scatter_chart(
+            ciudad_nps,
+            x="Tiempo_Entrega",
+            y="NPS",
+            x_label="Tiempo Entrega (días)",
+            y_label="NPS Promedio",
+            size="Ventas",
+        )
+    with col_c2:
+        st.dataframe(
+            ciudad_nps.set_index("Ciudad_Destino"),
+            use_container_width=True,
+            column_config={
+                "Tiempo_Entrega": st.column_config.NumberColumn("Tiempo Entrega", format="%.1f"),
+                "NPS": st.column_config.NumberColumn("NPS", format="%.1f"),
+                "Ventas": "Ventas",
+            },
+        )
+        peor_ciudad = ciudad_nps.iloc[0]
+        st.warning(
+            f"🚨 **{peor_ciudad['Ciudad_Destino']}**: NPS {peor_ciudad['NPS']:.1f}, "
+            f"entrega {peor_ciudad['Tiempo_Entrega']} días. "
+            f"Requiere cambio inmediato de operador."
+        )
+
+    st.divider()
+    st.markdown("**NPS vs Tiempo de Entrega por Bodega**")
+
+    col_b1, col_b2 = st.columns([3, 2])
+    with col_b1:
+        st.scatter_chart(
+            bodega_nps,
+            x="Tiempo_Entrega",
+            y="NPS",
+            x_label="Tiempo Entrega (días)",
+            y_label="NPS Promedio",
+            size="Ventas",
+        )
+    with col_b2:
+        st.dataframe(
+            bodega_nps.set_index("Bodega_Origen"),
+            use_container_width=True,
+            column_config={
+                "Tiempo_Entrega": st.column_config.NumberColumn("Tiempo Entrega", format="%.1f"),
+                "NPS": st.column_config.NumberColumn("NPS", format="%.1f"),
+                "Ventas": "Ventas",
+            },
+        )
+        peor_bodega = bodega_nps.iloc[0]
+        st.warning(
+            f"🚨 **{peor_bodega['Bodega_Origen']}**: NPS {peor_bodega['NPS']:.1f}, "
+            f"entrega {peor_bodega['Tiempo_Entrega']} días, "
+            f"{int(peor_bodega['Ventas'])} ventas. "
+            f"Es la bodega con mayor volumen y peor satisfacción."
+        )
+
+    st.divider()
+    st.subheader("📋 Conclusión")
+
+    mejor_ciudad = ciudad_nps.iloc[-1]
+    mejor_bodega = bodega_nps.iloc[-1]
+
+    st.error(
+        f"**Ventas_Web** es la zona más crítica: tiene el peor NPS ({ciudad_nps.iloc[0]['NPS']:.1f}) "
+        f"y el tiempo de entrega más alto ({ciudad_nps.iloc[0]['Tiempo_Entrega']} días). "
+        f"Requiere un cambio inmediato de operador logístico.\n\n"
+        f"**Bodega Norte** es la prioridad entre las bodegas: con {int(peor_bodega['Ventas'])} ventas "
+        f"(la de mayor volumen), su NPS es de solo {peor_bodega['NPS']:.1f}. "
+        f"Cualquier mejora aquí impacta desproporcionadamente la satisfacción global.\n\n"
+        f"**BOD-EXT-99** es un caso atípico positivo: aunque su tiempo de entrega es alto "
+        f"({mejor_bodega['Tiempo_Entrega']} días), tiene el mejor NPS (+{mejor_bodega['NPS']:.1f}). "
+        f"Algo están haciendo bien en servicio al cliente que compensa la demora logística. "
+        f"Estudiar sus prácticas para replicarlas.\n\n"
+        f"En el otro extremo, **{mejor_ciudad['Ciudad_Destino']}** y **Bodega Sur** "
+        f"demuestran que entregar rápido ({mejor_ciudad['Tiempo_Entrega']} y {bodega_nps.iloc[-2]['Tiempo_Entrega']} días) "
+        f"se correlaciona con NPS positivo (+{mejor_ciudad['NPS']:.1f} y +{bodega_nps.iloc[-2]['NPS']:.1f})."
+    )
