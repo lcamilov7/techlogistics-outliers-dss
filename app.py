@@ -1396,3 +1396,165 @@ with tab_reto:
         f"Esto recuperaría trazabilidad sobre USD {info_huerfanos['ingreso_huerfano_usd']:,.0f} "
         f"en ingresos anuales."
     )
+
+    # =============================================
+    # PREGUNTA 4
+    # =============================================
+    st.divider()
+    st.subheader("4. Diagnóstico de Fidelidad")
+    st.markdown("""
+    **Pregunta:** ¿Existen categorías de productos con alta disponibilidad (stock alto)
+    pero con un sentimiento de cliente negativo? Explique la paradoja: ¿Es mala calidad
+    de producto o sobrecosto?
+    """)
+
+    df_nps_p4 = df_unido.merge(
+        fb_limpio.groupby("Transaccion_ID")["Satisfaccion_NPS"].mean().reset_index().rename(
+            columns={"Satisfaccion_NPS": "NPS_Promedio"}
+        ),
+        on="Transaccion_ID", how="inner",
+    )
+
+    fidelidad = df_nps_p4.groupby("Categoria").agg(
+        Stock_Promedio=("Stock_Actual", "mean"),
+        NPS=("NPS_Promedio", "mean"),
+        Ventas=("Transaccion_ID", "count"),
+    ).reset_index().sort_values("Stock_Promedio", ascending=False)
+    fidelidad["Stock_Promedio"] = fidelidad["Stock_Promedio"].round(0).astype(int)
+    fidelidad["NPS"] = fidelidad["NPS"].round(1)
+
+    col_f1, col_f2 = st.columns([3, 2])
+    with col_f1:
+        st.scatter_chart(
+            fidelidad,
+            x="Stock_Promedio",
+            y="NPS",
+            x_label="Stock Promedio",
+            y_label="NPS Promedio",
+            size="Ventas",
+        )
+    with col_f2:
+        st.dataframe(
+            fidelidad.set_index("Categoria"),
+            use_container_width=True,
+            column_config={
+                "Stock_Promedio": st.column_config.NumberColumn("Stock Prom.", format="%d"),
+                "NPS": st.column_config.NumberColumn("NPS", format="%.1f"),
+                "Ventas": "Ventas con feedback",
+            },
+        )
+        peor_fid = fidelidad.loc[fidelidad["NPS"].idxmin()]
+        mejor_fid = fidelidad.loc[fidelidad["NPS"].idxmax()]
+        st.warning(
+            f"🚨 **{peor_fid['Categoria']}**: stock alto ({peor_fid['Stock_Promedio']}) "
+            f"pero NPS {peor_fid['NPS']:.1f}. La paradoja de la fidelidad."
+        )
+
+    st.divider()
+    st.subheader("📋 Conclusión")
+
+    st.error(
+        f"**{peor_fid['Categoria']}** es la paradoja de fidelidad: stock abundante "
+        f"({peor_fid['Stock_Promedio']} unidades promedio) pero el peor NPS del catálogo "
+        f"({peor_fid['NPS']:.1f}). Los clientes encuentran el producto disponible, "
+        f"pero no les gusta.\n\n"
+        f"**No es sobrecosto:** en la Pregunta 1 vimos que Smartphones tiene una pérdida "
+        f"promedio por transacción similar al resto de categorías (USD -3,883 vs rango "
+        f"USD -3,312 a -3,883). Si fuera un problema de precio, la pérdida sería "
+        f"desproporcionadamente mayor. El margen negativo es sistémico, no exclusivo "
+        f"de Smartphones.\n\n"
+        f"**Es mala calidad de producto:** el stock está disponible, el precio no es "
+        f"el problema diferencial, pero los clientes igual califican mal (NPS {peor_fid['NPS']:.1f}). "
+        f"La causa más probable es calidad del producto, no estrategia de precios.\n\n"
+        f"En contraste, **{mejor_fid['Categoria']}** tiene stock similar ({mejor_fid['Stock_Promedio']}) "
+        f"pero NPS +{mejor_fid['NPS']:.1f}. El mismo nivel de disponibilidad, "
+        f"satisfacción opuesta. La diferencia está en el producto, no en la logística.\n\n"
+        f"**Recomendación:** Investigar la calidad de los Smartphones del portafolio "
+        f"(devoluciones, defectos reportados, quejas en Comentario_Texto). "
+        f"Considerar cambiar de proveedor o revisar las especificaciones del producto."
+    )
+
+    # =============================================
+    # PREGUNTA 5
+    # =============================================
+    st.divider()
+    st.subheader("5. Storytelling de Riesgo Operativo")
+    st.markdown("""
+    **Pregunta:** Visualice la relación entre la antigüedad de la última revisión
+    del stock y la tasa de tickets de soporte. ¿Qué bodegas están operando a ciegas
+    y cómo impacta esto en la satisfacción final?
+    """)
+
+    hoy = pd.Timestamp.today()
+    df_nps_p5 = df_nps_p4.copy()
+    df_nps_p5["Antiguedad_Revision"] = (hoy - df_nps_p5["Ultima_Revision"]).dt.days
+
+    riesgo = df_nps_p5.groupby("Bodega_Origen").agg(
+        Antiguedad=("Antiguedad_Revision", "mean"),
+        Ant_Min=("Antiguedad_Revision", "min"),
+        Ant_Max=("Antiguedad_Revision", "max"),
+        NPS=("NPS_Promedio", "mean"),
+        Ventas=("Transaccion_ID", "count"),
+    ).reset_index().sort_values("Antiguedad", ascending=False)
+    riesgo["Antiguedad"] = riesgo["Antiguedad"].round(0).astype(int)
+    riesgo["Ant_Min"] = riesgo["Ant_Min"].round(0).astype(int)
+    riesgo["Ant_Max"] = riesgo["Ant_Max"].round(0).astype(int)
+    riesgo["NPS"] = riesgo["NPS"].round(1)
+
+    col_r1, col_r2 = st.columns([3, 2])
+    with col_r1:
+        st.scatter_chart(
+            riesgo,
+            x="Antiguedad",
+            y="NPS",
+            x_label="Días desde última revisión",
+            y_label="NPS Promedio",
+            size="Ventas",
+        )
+    with col_r2:
+        st.dataframe(
+            riesgo.set_index("Bodega_Origen"),
+            use_container_width=True,
+            column_config={
+                "Antiguedad": st.column_config.NumberColumn("Promedio", format="%d días"),
+                "Ant_Min": st.column_config.NumberColumn("Mín", format="%d"),
+                "Ant_Max": st.column_config.NumberColumn("Máx", format="%d"),
+                "NPS": st.column_config.NumberColumn("NPS", format="%.1f"),
+                "Ventas": "Ventas",
+            },
+        )
+        st.caption(
+            "La antigüedad es un promedio de los productos que despacha cada bodega. "
+            "Todas manejan el mismo rango (~180 a ~876 días) porque Ultima_Revision "
+            "es una propiedad del producto, no de la bodega."
+        )
+        mas_antigua = riesgo.iloc[0]
+        st.warning(
+            f"📦 **{mas_antigua['Bodega_Origen']}**: {mas_antigua['Antiguedad']} días sin revisión "
+            f"— la más antigua. Sin embargo, NPS +{mas_antigua['NPS']:.1f} "
+            f"(el mejor). La antigüedad no determina la satisfacción."
+        )
+
+    st.divider()
+    st.subheader("📋 Conclusión")
+
+    todas_antiguedad = riesgo["Antiguedad"].mean()
+    st.error(
+        f"**Todas las bodegas llevan ~{todas_antiguedad:.0f} días promedio sin revisión** "
+        f"con el mismo rango (~180 a ~876 días). "
+        f"Ultima_Revision es una propiedad del producto (cada SKU tiene su fecha), "
+        f"no de la bodega. Todas despachan la misma mezcla de productos recién revisados "
+        f"y abandonados.\n\n"
+        f"La antigüedad de revisión NO se correlaciona con el NPS: "
+        f"**{mas_antigua['Bodega_Origen']}** tiene el promedio más alto ({mas_antigua['Antiguedad']} días) "
+        f"pero el mejor NPS (+{mas_antigua['NPS']:.1f}). "
+        f"**{riesgo.iloc[-1]['Bodega_Origen']}** tiene el promedio más bajo "
+        f"({int(riesgo.iloc[-1]['Antiguedad'])} días) y NPS {riesgo.iloc[-1]['NPS']:.1f}.\n\n"
+        f"La antigüedad de revisión NO es el factor que explica la satisfacción del cliente. "
+        f"Otros factores (calidad de producto, tiempos de entrega) pesan más.\n\n"
+        f"**Recomendación:** No priorizar las revisiones de inventario como palanca de NPS. "
+        f"Enfocarse en reducir tiempos de entrega (Pregunta 2) y "
+        f"mejorar la calidad de Smartphones (Pregunta 4). "
+        f"Las revisiones de inventario deben mantenerse por compliance, "
+        f"no como estrategia de satisfacción."
+    )
