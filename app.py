@@ -157,8 +157,8 @@ with st.spinner("Procesando Fase 2: creando fuente única de verdad..."):
     info_huerfanos = resumen_huerfanos(df_unido)
 
 # --- Tabs ---
-tab_auditoria, tab_transparencia, tab_operaciones, tab_cliente, tab_ia = st.tabs(
-    ["🔍 Auditoría", "🧾 Transparencia", "🚚 Operaciones", "👤 Cliente", "🤖 Insights IA"]
+tab_auditoria, tab_transparencia, tab_operaciones, tab_cliente, tab_ia, tab_reto = st.tabs(
+    ["🔍 Auditoría", "🧾 Transparencia", "🚚 Operaciones", "👤 Cliente", "🤖 Insights IA", "🎯 Reto Analítico"]
 )
 
 # =============================================
@@ -939,3 +939,202 @@ with tab_ia:
             )
     else:
         st.info("Hacé clic en el botón para que Llama-3 analice todos los hallazgos y genere recomendaciones estratégicas.")
+
+
+# =============================================
+# TAB 6: RETO ANALITICO (5 Preguntas de Alta Gerencia)
+# =============================================
+with tab_reto:
+    st.header("🎯 Reto Analítico — 5 Preguntas de Alta Gerencia")
+
+    # =============================================
+    # PREGUNTA 1
+    # =============================================
+    st.subheader("1. Fuga de Capital y Rentabilidad")
+    st.markdown("""
+    **Pregunta:** Localice los SKUs que se están vendiendo con margen negativo.
+    ¿Representan una pérdida aceptable por volumen o es una falla crítica de precios
+    en el canal Online?
+    """)
+
+    # Datos para la pregunta
+    con_costo = df_unido["Margen_Bruto"].notnull()
+    neg = df_unido[con_costo][df_unido.loc[con_costo, "Margen_Bruto"] < 0]
+    pos = df_unido[con_costo][df_unido.loc[con_costo, "Margen_Bruto"] >= 0]
+
+    col_p1a, col_p1b, col_p1c, col_p1d = st.columns(4)
+    with col_p1a:
+        st.metric("Transacciones con pérdida", f"{len(neg):,}",
+                  delta=f"{len(neg)/con_costo.sum()*100:.0f}% del total",
+                  delta_color="off")
+    with col_p1b:
+        st.metric("Pérdida total", f"${neg['Margen_Bruto'].sum():,.0f}",
+                  delta_color="inverse")
+    with col_p1c:
+        st.metric("Pérdida promedio por venta", f"${neg['Margen_Bruto'].mean():,.0f}",
+                  delta_color="inverse")
+    with col_p1d:
+        st.metric("Transacciones con ganancia", f"{len(pos):,}",
+                  delta=f"{len(pos)/con_costo.sum()*100:.0f}% del total",
+                  delta_color="off")
+
+    st.divider()
+    st.markdown("**Pérdida por canal de venta** — ¿es el canal Online el culpable?")
+
+    perdida_canal = neg.groupby("Canal_Venta").agg(
+        Transacciones=("Transaccion_ID", "count"),
+        Perdida_Total=("Margen_Bruto", "sum"),
+    ).reset_index()
+    perdida_canal["Perdida_Total"] = perdida_canal["Perdida_Total"].round(0)
+
+    col_c1, col_c2 = st.columns([2, 1])
+    with col_c1:
+        st.bar_chart(perdida_canal.set_index("Canal_Venta")["Perdida_Total"],
+                     x_label="Canal", y_label="Pérdida Total (USD)")
+    with col_c2:
+        st.dataframe(
+            perdida_canal.rename(columns={"Perdida_Total": "Pérdida USD"}).set_index("Canal_Venta"),
+            use_container_width=True,
+        )
+        st.caption(
+            "La pérdida está distribuida uniformemente entre los 4 canales. "
+            "**El canal Online NO es peor que los demás.** "
+            "No es un problema de un canal específico."
+        )
+
+    st.divider()
+    st.markdown("**Pérdida por categoría** — ¿dónde se concentra la fuga?")
+
+    perdida_cat = neg.groupby("Categoria").agg(
+        Transacciones=("Transaccion_ID", "count"),
+        Perdida_Total=("Margen_Bruto", "sum"),
+        Perdida_Promedio=("Margen_Bruto", "mean"),
+    ).reset_index().sort_values("Perdida_Promedio")
+    perdida_cat["Perdida_Total"] = perdida_cat["Perdida_Total"].round(0)
+    perdida_cat["Perdida_Promedio"] = perdida_cat["Perdida_Promedio"].round(0)
+
+    col_cat1, col_cat2 = st.columns([2, 1])
+    with col_cat1:
+        st.bar_chart(perdida_cat.set_index("Categoria")["Perdida_Promedio"],
+                     x_label="Categoría", y_label="Pérdida Promedio por Venta (USD)")
+    with col_cat2:
+        st.dataframe(
+            perdida_cat.set_index("Categoria"),
+            use_container_width=True,
+            column_config={
+                "Transacciones": "N",
+                "Perdida_Total": st.column_config.NumberColumn("Pérdida Total", format="$%.0f"),
+                "Perdida_Promedio": st.column_config.NumberColumn("Pérdida Promedio", format="$%.0f"),
+            },
+        )
+        st.markdown(
+            "Smartphones tiene la peor pérdida promedio (USD -3,883), pero "
+            "las 6 categorías están en un rango muy estrecho (USD -3,312 a USD -3,883). "
+            "**No hay una categoría dramáticamente peor que las demás.** "
+            "El problema es sistémico, no puntual."
+        )
+
+    st.divider()
+    st.markdown("**Análisis a nivel SKU** — ¿hay productos específicos fugando capital?")
+
+    # Perdida por SKU
+    perdida_sku = neg.groupby("SKU_ID").agg(
+        Categoria=("Categoria", "first"),
+        Veces=("Transaccion_ID", "count"),
+        Perdida_Total=("Margen_Bruto", "sum"),
+        Perdida_Promedio=("Margen_Bruto", "mean"),
+    ).reset_index().sort_values("Perdida_Total")
+    perdida_sku["Perdida_Total"] = perdida_sku["Perdida_Total"].round(0)
+    perdida_sku["Perdida_Promedio"] = perdida_sku["Perdida_Promedio"].round(0)
+
+    n_skus = len(perdida_sku)
+    top20_idx = int(n_skus * 0.2)
+    repetidores = perdida_sku[perdida_sku["Veces"] >= 5]
+    una_vez = perdida_sku[perdida_sku["Veces"] == 1]
+    pct_top20 = perdida_sku.head(top20_idx)["Perdida_Total"].sum() / perdida_sku["Perdida_Total"].sum() * 100
+
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+    with col_s1:
+        st.metric("SKUs con pérdida", f"{n_skus:,}",
+                  help="Productos que tuvieron al menos una transacción con margen negativo.")
+    with col_s2:
+        st.metric("Top 20% concentra", f"{pct_top20:.0f}% de la pérdida",
+                  help=f"{top20_idx} SKUs generan el {pct_top20:.0f}% del total de pérdidas.")
+    with col_s3:
+        st.metric("Reincidentes (5+ pérdidas)", f"{len(repetidores)} SKUs",
+                  help=f"Pierden USD {repetidores['Perdida_Total'].sum():,.0f} en total. Prioridad de intervencion.")
+    with col_s4:
+        st.metric("Incidentes aislados (1 sola)", f"{len(una_vez)} SKUs",
+                  help="Posibles errores puntuales, no requieren acción estructural.")
+
+    st.divider()
+    st.markdown("**Gráfico de Pareto** — pocos SKUs concentran la mayor pérdida")
+
+    # Pareto data
+    pareto = perdida_sku.copy()
+    pareto["Pct_Acum"] = pareto["Perdida_Total"].cumsum() / pareto["Perdida_Total"].sum() * 100
+    pareto["Indice"] = range(1, len(pareto) + 1)
+
+    col_par1, col_par2 = st.columns([3, 1])
+    with col_par1:
+        st.bar_chart(
+            pareto.set_index("Indice")["Pct_Acum"].head(500),
+            x_label="Cantidad de SKUs (ordenados de peor a mejor)",
+            y_label="% Acumulado de Pérdida",
+        )
+    with col_par2:
+        st.markdown(
+            f"**20%** de SKUs → **{pct_top20:.0f}%** de la pérdida  \n"
+            "**50%** de SKUs → **86.8%** de la pérdida  \n"
+            "**80%** de SKUs → **98.5%** de la pérdida  \n\n"
+            "Corregir los peores SKUs tiene un impacto desproporcionado."
+        )
+
+    st.divider()
+    st.markdown("**Top 20 SKUs con mayor fuga de capital**")
+
+    top20 = perdida_sku.head(20)
+    st.dataframe(
+        top20.set_index("SKU_ID"),
+        use_container_width=True,
+        height=400,
+        column_config={
+            "Categoria": "Categoría",
+            "Veces": st.column_config.NumberColumn("Veces", format="%d"),
+            "Perdida_Total": st.column_config.NumberColumn("Pérdida Total", format="$%.0f"),
+            "Perdida_Promedio": st.column_config.NumberColumn("Pérdida Prom.", format="$%.0f"),
+        },
+    )
+    cats_top20 = top20["Categoria"].value_counts()
+    st.markdown(
+        f"Estos 20 SKUs estan repartidos en TODAS las categorias. "
+        f"El peor (PROD-2858, Smartphones) pierde USD {top20.iloc[0]['Perdida_Total']:,.0f} "
+        f"en {int(top20.iloc[0]['Veces'])} transacciones (USD {top20.iloc[0]['Perdida_Promedio']:,.0f}/venta). "
+        "Cada uno de estos productos pierde dinero de forma CONSISTENTE, no por un incidente aislado."
+    )
+
+    st.divider()
+    st.subheader("📋 Conclusión")
+
+    st.error(
+        "**No es una pérdida aceptable por volumen, ni es una falla exclusiva del canal Online.** "
+        "Es una **falla SISTÉMICA de precios** que afecta a TODOS los canales y categorías.\n\n"
+        "Evidencia:\n"
+        "- Los 4 canales pierden casi lo mismo (aprox. USD 3M cada uno). El canal Online NO es el culpable.\n"
+        "- Las 6 categorias tienen perdida promedio casi identica (USD -3,312 a USD -3,883). "
+        "Smartphones es la peor (USD -3,883), pero la diferencia con Tablets (USD -3,312) es solo USD 571 (15%). "
+        "No hay una categoria que se desvie significativamente del resto.\n"
+        "- **Analisis SKU**: " + f"{n_skus:,} productos pierden dinero. "
+        "El 20% de ellos (325 SKUs) concentra el " + f"{pct_top20:.0f}% de la perdida total. "
+        "Hay 62 SKUs reincidentes (5+ perdidas cada uno) que juntos fugan USD 1.5M - "
+        "corregirles el precio es la accion de mayor impacto inmediato.\n\n"
+        "Esto indica que el problema no es de un producto o canal puntual: "
+        "**el costo unitario de los productos supera sistemáticamente el precio de venta "
+        "en toda la operación.** "
+        "La empresa está vendiendo por debajo del costo en el 39% de sus transacciones "
+        "con catálogo conocido, sin importar qué vende ni por dónde lo vende.\n\n"
+        "**Recomendación:** Revisar la política de precios global, pero empezando por "
+        "los 62 SKUs reincidentes como victoria temprana. Luego escalar a toda la operación. "
+        "Evaluar si los costos de adquisición reportados en el ERP son reales o si los "
+        "precios de venta están anclados por debajo del mercado en todos los segmentos."
+    )
